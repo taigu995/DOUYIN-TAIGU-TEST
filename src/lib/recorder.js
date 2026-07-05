@@ -567,9 +567,11 @@ class Recorder {
     const args = [
       '-rw_timeout', '10000000',
       '-timeout', '10000000',
+      '-fflags', '+genpts+igndts',
       '-i', streamUrl,
       '-c', 'copy',
       '-movflags', '+faststart',
+      '-avoid_negative_ts', 'make_zero',
       '-y',
       this.outputFile
     ];
