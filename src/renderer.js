@@ -180,7 +180,7 @@ function bindEvents() {
       if (result.success) {
         showToast(result.message || '登录数据已清除', 'success');
         // 刷新登录状态
-        setTimeout(loadLoginStatus, 500);
+        setTimeout(updateLoginStatus, 500);
       } else {
         showToast('清除失败: ' + (result.error || '未知错误'), 'error');
       }

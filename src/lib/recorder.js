@@ -98,7 +98,8 @@ class Recorder {
         partition: this.session || 'persist:douyin', // 共享登录态
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
         // 自动播放视频但静音，防止音频从扬声器输出
-        additionalArguments: ['--autoplay-policy=no-user-gesture-required', '--mute-audio']
+        additionalArguments: ['--autoplay-policy=no-user-gesture-required', '--mute-audio'],
+        audioPlaybackPolicy: 'never'
       }
     });
 
@@ -677,6 +678,10 @@ class Recorder {
     const streamUrl = streamInfo.url;
     logger.info(`[Recorder] 使用直播流直接录制: ${streamUrl.substring(0, 80)}...`);
 
+    // 提前设置模式标记，避免 FFmpeg 进程快速退出时的竞态条件
+    this.hasAudio = true;
+    this._isStreamMode = true;
+
     const args = [
       '-rw_timeout', '10000000',
       '-timeout', '10000000',
@@ -725,9 +730,24 @@ class Recorder {
       logger.error(`[FFmpeg-Stream] 进程错误:`, err);
       this.onError(this.roomId, err);
     });
+  }
 
-    this.hasAudio = true;
-    this._isStreamMode = true;
+  /**
+   * 从 Electron session 中获取指定域名的 cookies 字符串
+   */
+  async _getSessionCookies(domain) {
+    try {
+      const { session } = require('electron');
+      const douyinSession = session.fromPartition(this.session || 'persist:douyin');
+      const cookies = await douyinSession.cookies.get({ domain: `.${domain}` });
+      return cookies
+        .filter(c => c.value && c.name)
+        .map(c => `${c.name}=${c.value}`)
+        .join('; ');
+    } catch (e) {
+      logger.warn(`[Recorder] 获取 session cookies 失败: ${e.message}`);
+      return '';
+    }
   }
 
   /**

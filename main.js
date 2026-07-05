@@ -334,7 +334,8 @@ function setupIPC() {
               partition: 'persist:douyin',
               contextIsolation: true,
               nodeIntegration: false,
-              additionalArguments: ['--mute-audio']
+              additionalArguments: ['--mute-audio'],
+              audioPlaybackPolicy: 'never'
             }
           });
           
