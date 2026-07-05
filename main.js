@@ -4,6 +4,7 @@
  */
 const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, session, nativeImage, shell } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { StreamManager } = require('./src/lib/stream-manager');
 const { getConfig, setConfig } = require('./src/lib/config');
 const { getLogger } = require('./src/lib/logger');
@@ -396,13 +397,47 @@ function setupIPC() {
 
   // 获取日志文件内容（兼容旧接口）
   ipcMain.handle('get-log-content', async () => {
-    return logger.getRecentLogs(500);
+    const content = logger.getRecentLogs(500);
+    return { path: logger.getLogPath(), content };
+  });
+
+  // 导出日志到指定位置
+  ipcMain.handle('export-logs', async () => {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '导出日志文件',
+      defaultPath: `douyin-recorder-logs-${new Date().toISOString().slice(0, 10)}.log`,
+      filters: [
+        { name: '日志文件', extensions: ['log', 'txt'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    });
+    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+    
+    try {
+      const logPath = logger.getLogPath();
+      if (fs.existsSync(logPath)) {
+        fs.copyFileSync(logPath, result.filePath);
+        return { success: true, path: result.filePath };
+      } else {
+        return { success: false, error: '日志文件不存在' };
+      }
+    } catch (err) {
+      logger.error('导出日志失败:', err);
+      return { success: false, error: err.message };
+    }
   });
 
   // 打开日志文件所在目录
   ipcMain.handle('open-log-folder', async () => {
     const logDir = logger.getLogDir();
     await shell.openPath(logDir);
+    return { success: true };
+  });
+
+  // 打开日志文件（用系统默认编辑器）
+  ipcMain.handle('open-log-file', async () => {
+    const logPath = logger.getLogPath();
+    await shell.openPath(logPath);
     return { success: true };
   });
 

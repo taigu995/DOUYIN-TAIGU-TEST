@@ -112,6 +112,46 @@ class Logger {
   }
 
   /**
+   * 获取日志文件大小
+   */
+  getLogSize() {
+    try {
+      if (!fs.existsSync(this.logFile)) return 0;
+      const stats = fs.statSync(this.logFile);
+      return stats.size;
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  /**
+   * 获取日志统计信息
+   */
+  getStats() {
+    try {
+      const content = this.getRecentLogs(10000);
+      const lines = content.split('\n');
+      let errorCount = 0;
+      let warnCount = 0;
+      let infoCount = 0;
+      lines.forEach(line => {
+        if (line.includes('[ERROR]')) errorCount++;
+        else if (line.includes('[WARN]')) warnCount++;
+        else if (line.includes('[INFO]')) infoCount++;
+      });
+      return {
+        totalLines: lines.length,
+        errorCount,
+        warnCount,
+        infoCount,
+        fileSize: this.getLogSize()
+      };
+    } catch (err) {
+      return { totalLines: 0, errorCount: 0, warnCount: 0, infoCount: 0, fileSize: 0 };
+    }
+  }
+
+  /**
    * 读取最近的日志内容
    */
   getRecentLogs(lines = 100) {

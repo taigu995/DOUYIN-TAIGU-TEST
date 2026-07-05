@@ -38,7 +38,10 @@ const elements = {
   logPanel: document.getElementById('log-panel'),
   btnCloseLogs: document.getElementById('btn-close-logs'),
   btnRefreshLogs: document.getElementById('btn-refresh-logs'),
-  btnOpenLogFile: document.getElementById('btn-open-log-file')
+  btnOpenLogFile: document.getElementById('btn-open-log-file'),
+  btnExportLogs: document.getElementById('btn-export-logs'),
+  btnClearLogs: document.getElementById('btn-clear-logs'),
+  logSizeInfo: document.getElementById('log-size-info')
 };
 
 // 当前直播间数据
@@ -164,7 +167,9 @@ function bindEvents() {
   elements.btnLogs.addEventListener('click', showLogPanel);
   elements.btnCloseLogs.addEventListener('click', hideLogPanel);
   elements.btnRefreshLogs.addEventListener('click', loadLogs);
-  elements.btnOpenLogFile.addEventListener('click', openLogFile);
+  elements.btnOpenLogFile.addEventListener('click', openLogFolder);
+  elements.btnExportLogs.addEventListener('click', exportLogs);
+  elements.btnClearLogs.addEventListener('click', clearLogs);
 }
 
 // ========== 添加直播间 ==========
@@ -262,27 +267,59 @@ async function loadLogs() {
   
   try {
     const result = await window.electronAPI.getLogContent();
-    logFilePath.textContent = result.path;
     
-    if (!result.content) {
+    // 兼容新旧格式
+    const content = typeof result === 'object' ? result.content : result;
+    const logPath = typeof result === 'object' ? result.path : '';
+    
+    if (logFilePath) {
+      logFilePath.textContent = logPath || '';
+    }
+    
+    // 显示日志文件大小信息
+    if (elements.logSizeInfo) {
+      try {
+        const pathInfo = await window.electronAPI.getLogPath();
+        elements.logSizeInfo.textContent = `日志路径: ${pathInfo}`;
+      } catch (e) {
+        elements.logSizeInfo.textContent = '';
+      }
+    }
+    
+    if (!content || content === 'No log file found.') {
       logContent.innerHTML = '<p class="log-loading">暂无日志记录</p>';
       return;
     }
 
     // Parse and colorize log lines
-    const lines = result.content.split('\n');
-    const html = lines.map(line => {
-      let cls = 'info';
-      if (line.includes('[ERROR]')) cls = 'error';
-      else if (line.includes('[WARN]')) cls = 'warn';
-      return `<div class="log-line ${cls}">${escapeHtml(line)}</div>`;
-    }).join('');
+    const lines = content.split('\n');
+    let totalLines = 0;
+    let errorCount = 0;
+    let warnCount = 0;
     
-    logContent.innerHTML = html;
+    const html = lines.map(line => {
+      if (!line.trim()) return '';
+      totalLines++;
+      let cls = 'info';
+      if (line.includes('[ERROR]')) { cls = 'error'; errorCount++; }
+      else if (line.includes('[WARN]')) { cls = 'warn'; warnCount++; }
+      return `<div class="log-line ${cls}">${escapeHtml(line)}</div>`;
+    }).filter(Boolean).join('');
+    
+    // 添加统计信息到顶部
+    const statsHtml = `
+      <div class="log-stats">
+        <span>共 ${totalLines} 行</span>
+        <span class="log-stat-error">错误: ${errorCount}</span>
+        <span class="log-stat-warn">警告: ${warnCount}</span>
+      </div>
+    `;
+    
+    logContent.innerHTML = statsHtml + html;
     // Scroll to bottom
     logContent.scrollTop = logContent.scrollHeight;
   } catch (err) {
-    logContent.innerHTML = `<p class="log-loading">加载日志失败: ${err.message}</p>`;
+    logContent.innerHTML = `<p class="log-loading">加载日志失败: ${escapeHtml(err.message)}</p>`;
   }
 }
 
@@ -292,9 +329,46 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-async function openLogFile() {
+async function openLogFolder() {
   if (isElectron) {
-    await window.electronAPI.openLogFile();
+    try {
+      await window.electronAPI.openLogFolder();
+    } catch (e) {
+      showToast('打开日志目录失败: ' + e.message, 'error');
+    }
+  }
+}
+
+async function exportLogs() {
+  if (!isElectron) {
+    showToast('导出功能仅在桌面应用中可用', 'warning');
+    return;
+  }
+  try {
+    const result = await window.electronAPI.exportLogs();
+    if (result.success) {
+      showToast(`日志已导出到: ${result.path}`, 'success');
+    } else if (!result.canceled) {
+      showToast('导出失败: ' + result.error, 'error');
+    }
+  } catch (err) {
+    showToast('导出出错: ' + err.message, 'error');
+  }
+}
+
+async function clearLogs() {
+  if (!isElectron) return;
+  if (!confirm('确定要清空所有日志吗？此操作不可恢复。')) return;
+  try {
+    const result = await window.electronAPI.clearLogs();
+    if (result.success) {
+      showToast('日志已清空', 'success');
+      await loadLogs();
+    } else {
+      showToast('清空失败', 'error');
+    }
+  } catch (err) {
+    showToast('清空出错: ' + err.message, 'error');
   }
 }
 
@@ -416,7 +490,13 @@ window.handleStartRecording = async function (roomId) {
     if (result.success) {
       showToast('开始录制', 'success');
     } else {
-      showToast('录制失败: ' + result.error, 'error');
+      // 如果是"正在录制中"的错误，提供更友好的提示
+      const errorMsg = result.error || '未知错误';
+      if (errorMsg.includes('录制中') || errorMsg.includes('已在运行')) {
+        showToast('该直播间已在录制中，请先停止当前录制或刷新列表', 'warning');
+      } else {
+        showToast('录制失败: ' + errorMsg, 'error');
+      }
     }
   } catch (err) {
     showToast('录制出错: ' + err.message, 'error');

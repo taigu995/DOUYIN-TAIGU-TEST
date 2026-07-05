@@ -67,5 +67,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   openLogFile: () => {
     return ipcRenderer.invoke('open-log-file');
+  },
+  exportLogs: () => {
+    return ipcRenderer.invoke('export-logs');
+  },
+  getRecentLogs: () => {
+    return ipcRenderer.invoke('get-recent-logs');
+  },
+  getLogPath: () => {
+    return ipcRenderer.invoke('get-log-path');
+  },
+  openLogFolder: () => {
+    return ipcRenderer.invoke('open-log-folder');
+  },
+  clearLogs: () => {
+    return ipcRenderer.invoke('clear-logs');
   }
 });

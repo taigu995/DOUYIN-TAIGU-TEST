@@ -110,11 +110,12 @@ class Recorder {
    */
   async startRecording() {
     if (this.recording) {
-      logger.warn(`Already recording for room ${this.roomId}`);
-      return;
+      const errMsg = `录制引擎已在运行中 (room: ${this.roomId})，请先停止再重试`;
+      logger.warn(errMsg);
+      throw new Error(errMsg);
     }
 
-    logger.info(`Starting recording for room ${this.roomId}, streamer: ${this.streamerName}`);
+    logger.info(`[Recorder] 准备开始录制 - 房间: ${this.roomId}, 主播: ${this.streamerName}, URL: ${this.liveUrl}`);
 
     try {
       const config = getConfig();
@@ -134,19 +135,24 @@ class Recorder {
       this.startTime = new Date();
       this.frameCount = 0;
 
-      logger.info(`Output file: ${this.outputFile}`);
+      logger.info(`[Recorder] 输出文件: ${this.outputFile}`);
 
       // 创建捕获窗口（如果还没创建）
       if (!this.captureWindow || this.captureWindow.isDestroyed()) {
+        logger.info('[Recorder] 正在创建捕获窗口...');
         await this.createCaptureWindow();
+        logger.info('[Recorder] 捕获窗口创建成功');
       }
 
       // 启动 FFmpeg 编码进程
+      logger.info(`[Recorder] 启动 FFmpeg 进程, FPS: ${config.fps || 30}`);
       this.startFFmpegProcess(config.fps || 30);
 
       // 开始捕获帧
       this.recording = true;
       this.startCapture();
+
+      logger.info(`[Recorder] 录制已开始: ${this.streamerName} -> ${this.outputFile}`);
 
       this.onStatusChange('recording', {
         roomId: this.roomId,
@@ -154,11 +160,22 @@ class Recorder {
         outputFile: this.outputFile,
         startTime: this.startTime
       });
-
-      console.log(`[Recorder] 开始录制: ${this.streamerName} -> ${this.outputFile}`);
     } catch (err) {
-      logger.error(`Failed to start recording: ${err.message}`);
+      logger.error(`[Recorder] 启动录制失败: ${err.message}`, err);
+      // 彻底清理状态
       this.recording = false;
+      if (this._captureInterval) {
+        clearInterval(this._captureInterval);
+        this._captureInterval = null;
+      }
+      if (this.ffmpegProcess) {
+        try { this.ffmpegProcess.kill('SIGKILL'); } catch (e) { /* ignore */ }
+        this.ffmpegProcess = null;
+      }
+      if (this.captureWindow && !this.captureWindow.isDestroyed()) {
+        try { this.captureWindow.destroy(); } catch (e) { /* ignore */ }
+        this.captureWindow = null;
+      }
       this.onStatusChange('error', {
         roomId: this.roomId,
         error: err.message

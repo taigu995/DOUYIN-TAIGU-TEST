@@ -176,17 +176,31 @@
       <div class="settings-header">
         <h2>运行日志</h2>
         <div class="settings-header-actions">
-          <button id="btn-refresh-logs" class="btn btn-ghost btn-sm" title="刷新">
+          <button id="btn-refresh-logs" class="btn btn-ghost btn-sm" title="刷新日志">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="23 4 23 10 17 10"></polyline>
               <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
             </svg>
           </button>
-          <button id="btn-open-log-file" class="btn btn-ghost btn-sm" title="打开日志文件">
+          <button id="btn-export-logs" class="btn btn-ghost btn-sm" title="导出日志文件">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            导出
+          </button>
+          <button id="btn-open-log-file" class="btn btn-ghost btn-sm" title="打开日志文件所在目录">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
               <polyline points="15 3 21 3 21 9"></polyline>
               <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+          </button>
+          <button id="btn-clear-logs" class="btn btn-ghost btn-sm" title="清空日志">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
           </button>
           <button id="btn-close-logs" class="btn btn-ghost btn-sm">
@@ -201,8 +215,9 @@
         <div id="log-content" class="log-content">
           <p class="log-loading">加载中...</p>
         </div>
-        <div class="settings-actions">
+        <div class="settings-actions log-actions-bar">
           <span id="log-file-path" class="log-file-path"></span>
+          <span id="log-size-info" class="log-size-info"></span>
         </div>
       </div>
     </section>

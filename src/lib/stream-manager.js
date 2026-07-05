@@ -239,6 +239,7 @@ class StreamManager {
     const { monitorWindow, info } = streamState;
 
     if (!monitorWindow || monitorWindow.isDestroyed()) {
+      logger.warn(`[Monitor] 监控窗口已销毁，重新创建: ${info.roomId}`);
       // 重新创建监控窗口
       await this.createMonitorWindow(streamState);
       return;
@@ -246,6 +247,7 @@ class StreamManager {
 
     try {
       // 重新加载页面以获取最新状态
+      logger.info(`[Monitor] 检查直播状态: ${info.streamerName} (${info.roomId})`);
       await monitorWindow.loadURL(info.liveUrl, {
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
       });
@@ -310,28 +312,45 @@ class StreamManager {
 
       // 状态变化处理
       if (isLive && !wasLive) {
-        console.log(`[Monitor] ${info.streamerName} 开播了!`);
+        logger.info(`[Monitor] ${info.streamerName} (${info.roomId}) 开播了!`);
         streamState.status = 'live';
 
-        // 自动开始录制
+        // 自动开始录制（检查全局开关和单个直播间开关）
         const config = getConfig();
-        if (config.autoStart) {
-          await this.startRecording(info.roomId);
+        const autoRecord = info.autoRecord !== false; // 默认为 true
+        if (config.autoStart && autoRecord) {
+          logger.info(`[Monitor] 自动录制已开启，开始录制: ${info.streamerName}`);
+          try {
+            await this.startRecording(info.roomId);
+          } catch (err) {
+            logger.error(`[Monitor] 自动录制启动失败 (${info.streamerName}): ${err.message}`);
+          }
         }
       } else if (!isLive && wasLive) {
-        console.log(`[Monitor] ${info.streamerName} 下播了`);
+        logger.info(`[Monitor] ${info.streamerName} (${info.roomId}) 下播了`);
         // 停止录制
         if (streamState.recorder) {
-          await streamState.recorder.stopRecording();
-          streamState.recorder.destroy();
+          try {
+            await streamState.recorder.stopRecording();
+            streamState.recorder.destroy();
+          } catch (err) {
+            logger.error(`[Monitor] 停止录制出错 (${info.streamerName}): ${err.message}`);
+          }
           streamState.recorder = null;
           streamState.status = 'offline';
+        }
+      } else if (isLive && wasLive) {
+        // 持续直播中，更新状态
+        if (streamState.recorder && streamState.recorder.recording) {
+          streamState.status = 'recording';
+        } else {
+          streamState.status = 'live';
         }
       }
 
       this.notifyUpdate();
     } catch (e) {
-      console.error(`[Monitor] 检查状态出错 (${info.streamerName}):`, e.message);
+      logger.error(`[Monitor] 检查状态出错 (${info.streamerName}, ${info.roomId}): ${e.message}`, e);
       streamState.status = 'error';
       this.notifyUpdate();
     }
@@ -340,14 +359,37 @@ class StreamManager {
   /**
    * 开始录制指定直播间
    */
-  async startRecording(roomId) {
+  async startRecording(roomId, force = false) {
     const streamState = this.streams.get(roomId);
     if (!streamState) throw new Error('直播间不存在');
+
+    // 如果已有录制实例且正在录制
     if (streamState.recorder && streamState.recorder.recording) {
-      throw new Error('正在录制中');
+      if (force) {
+        // 强制重置：先停止现有录制
+        logger.warn(`[StreamManager] 强制重置录制: ${streamState.info.streamerName} (${roomId})`);
+        try {
+          await streamState.recorder.stopRecording();
+          streamState.recorder.destroy();
+        } catch (e) {
+          logger.warn(`[StreamManager] 强制重置时清理旧录制出错: ${e.message}`);
+        }
+        streamState.recorder = null;
+      } else {
+        logger.warn(`[StreamManager] 已在录制中: ${streamState.info.streamerName} (${roomId})`);
+        throw new Error('该直播间正在录制中，请先停止当前录制');
+      }
+    }
+
+    // 清理残留的录制实例（状态异常的情况）
+    if (streamState.recorder && !streamState.recorder.recording) {
+      logger.info(`[StreamManager] 清理残留录制实例: ${roomId}`);
+      try { streamState.recorder.destroy(); } catch (e) { /* ignore */ }
+      streamState.recorder = null;
     }
 
     const config = getConfig();
+    logger.info(`[StreamManager] 开始录制: ${streamState.info.streamerName} (${roomId}), URL: ${streamState.info.liveUrl}`);
 
     const recorder = new Recorder({
       roomId: streamState.info.roomId,
@@ -358,8 +400,8 @@ class StreamManager {
       onStatusChange: (status, data) => {
         if (status === 'recording') {
           streamState.status = 'recording';
-          // 记录当前录制开始时间
           streamState.currentRecordingStart = Date.now();
+          logger.info(`[StreamManager] 录制状态变更 -> recording: ${streamState.info.streamerName}`);
         } else if (status === 'stopped') {
           streamState.status = streamState.isLive ? 'live' : 'offline';
           // 保存录制记录
@@ -368,7 +410,8 @@ class StreamManager {
               startTime: streamState.currentRecordingStart,
               endTime: Date.now(),
               outputFile: data.outputFile,
-              fileSize: data.fileSize || 0
+              fileSize: data.fileSize || 0,
+              streamerName: streamState.info.streamerName
             };
             if (!streamState.info.recordingHistory) {
               streamState.info.recordingHistory = [];
@@ -379,31 +422,37 @@ class StreamManager {
               streamState.info.recordingHistory = streamState.info.recordingHistory.slice(0, 50);
             }
             updateStream(streamState.info.roomId, { recordingHistory: streamState.info.recordingHistory });
-            logger.info(`Recording saved: ${data.outputFile}, size: ${data.fileSize}`);
+            logger.info(`[StreamManager] 录制完成: ${data.outputFile}, 大小: ${data.fileSize} bytes, 帧数: ${data.frameCount}`);
           }
           streamState.currentRecordingStart = null;
+        } else if (status === 'error') {
+          streamState.status = 'error';
+          logger.error(`[StreamManager] 录制错误 (${streamState.info.streamerName}): ${data && data.error}`);
         }
         this.notifyUpdate();
       },
       onError: (id, err) => {
-        console.error(`[Recorder] 录制错误 (${streamState.info.streamerName}):`, err);
+        logger.error(`[StreamManager] 录制引擎错误 (${streamState.info.streamerName}): ${err.message}`);
         streamState.status = 'error';
         this.notifyUpdate();
       }
     });
 
     streamState.recorder = recorder;
+    streamState.status = 'checking';
+    this.notifyUpdate();
 
     try {
       await recorder.startRecording();
       streamState.status = 'recording';
       streamState.currentRecordingStart = Date.now();
+      logger.info(`[StreamManager] 录制启动成功: ${streamState.info.streamerName}`);
       this.notifyUpdate();
     } catch (err) {
-      logger.error(`Failed to start recording for ${streamState.info.streamerName}: ${err.message}`);
+      logger.error(`[StreamManager] 录制启动失败 (${streamState.info.streamerName}): ${err.message}`);
       streamState.status = 'error';
       streamState.recorder = null;
-      recorder.destroy();
+      try { recorder.destroy(); } catch (e) { /* ignore */ }
       this.notifyUpdate();
       throw err;
     }

@@ -802,6 +802,43 @@ body {
   font-size: 11px;
   color: var(--text-muted);
   font-family: monospace;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-size-info {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.log-actions-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.log-stats {
+  display: flex;
+  gap: 16px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-light);
+}
+
+.log-stat-error {
+  color: var(--danger);
+}
+
+.log-stat-warn {
+  color: #f59e0b;
 }
 
 .settings-header-actions {
