@@ -209,6 +209,11 @@ if ($buildSuccess) {
         $buildSuccess = $false
     } else {
         Write-Log "Dependencies installed successfully" "OK"
+        
+        # Approve electron postinstall script (npm v11+ blocks it by default)
+        Write-Log "Approving electron install scripts..." "STEP"
+        $approveOutput = & npm approve-scripts electron 2>&1
+        $approveOutput | ForEach-Object { Write-Log $_.ToString() "INFO" }
     }
 }
 
@@ -220,7 +225,15 @@ if ($buildSuccess) {
     Write-Host "  ------------------------------------------------------------" -ForegroundColor DarkGray
     Write-Log "Step 4/5: Building EXE package..." "STEP"
     
+    # Clean dist directory before build
+    $distPath = Join-Path $ProjectDir "dist"
+    if (Test-Path $distPath) {
+        Write-Log "Cleaning old dist directory..." "STEP"
+        Remove-Item -Recurse -Force $distPath -ErrorAction SilentlyContinue
+    }
+    
     Write-Log "Running electron-builder (first build downloads Electron binary)..." "STEP"
+    Write-Host "     (If build fails with 'UNKNOWN error', temporarily disable antivirus)" -ForegroundColor DarkYellow
     Write-Host ""
     
     $buildOutput = & npm run build 2>&1
@@ -241,6 +254,12 @@ if ($buildSuccess) {
     
     if ($buildExitCode -ne 0) {
         Write-Log "Build failed! Check build_log.txt for details" "ERROR"
+        Write-Host ""
+        Write-Host "  [TIP] If error contains 'UNKNOWN: unknown error, open':" -ForegroundColor Yellow
+        Write-Host "        1. Temporarily disable Windows Defender real-time protection" -ForegroundColor Yellow
+        Write-Host "        2. Add project folder to antivirus exclusion list" -ForegroundColor Yellow
+        Write-Host "        3. Run this script as Administrator" -ForegroundColor Yellow
+        Write-Host "        4. Try building again" -ForegroundColor Yellow
         $buildSuccess = $false
     } else {
         Write-Log "EXE build complete!" "OK"
