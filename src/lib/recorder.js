@@ -10,6 +10,9 @@ const path = require('path');
 const fs = require('fs');
 const { generateFileName } = require('./douyin-utils');
 const { getConfig } = require('./config');
+const { getLogger } = require('./logger');
+
+const logger = getLogger();
 
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
@@ -108,6 +111,8 @@ class Recorder {
   async startRecording() {
     if (this.recording) return;
 
+    logger.info(`Starting recording for room ${this.roomId}, streamer: ${this.streamerName}`);
+
     const config = getConfig();
     const baseOutputFolder = this.outputFolder || config.outputFolder || this.getDefaultOutputFolder();
 
@@ -124,6 +129,8 @@ class Recorder {
     this.outputFile = path.join(streamerFolder, `${fileName}.${config.fileFormat || 'mp4'}`);
     this.startTime = new Date();
     this.frameCount = 0;
+
+    logger.info(`Output file: ${this.outputFile}`);
 
     // 创建捕获窗口（如果还没创建）
     if (!this.captureWindow || this.captureWindow.isDestroyed()) {
@@ -217,7 +224,7 @@ class Recorder {
         }
       } catch (err) {
         if (err.message && !err.message.includes('destroyed')) {
-          console.error('[Recorder] 捕获帧错误:', err.message);
+          logger.error('Frame capture error:', err.message);
         }
       }
     }, interval);
@@ -230,7 +237,7 @@ class Recorder {
     if (!this.recording) return;
 
     this.recording = false;
-    console.log(`[Recorder] 停止录制: ${this.streamerName}, 共 ${this.frameCount} 帧`);
+    logger.info(`Stopping recording: ${this.streamerName}, total frames: ${this.frameCount}`);
 
     // 停止捕获
     if (this._captureInterval) {

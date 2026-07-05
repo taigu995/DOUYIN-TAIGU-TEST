@@ -53,5 +53,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('login-status-changed', () => {
       callback();
     });
+  },
+
+  // 日志相关
+  getLogContent: () => {
+    return ipcRenderer.invoke('get-log-content');
+  },
+  openLogFile: () => {
+    return ipcRenderer.invoke('open-log-file');
   }
 });

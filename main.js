@@ -2,10 +2,23 @@
  * 抖音直播录制工具 - Electron 主进程
  * 负责窗口管理、IPC通信、系统托盘
  */
-const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, session, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, session, nativeImage, shell } = require('electron');
 const path = require('path');
 const { StreamManager } = require('./src/lib/stream-manager');
 const { getConfig, setConfig } = require('./src/lib/config');
+const { getLogger } = require('./src/lib/logger');
+
+// 初始化日志
+const logger = getLogger();
+
+// 全局错误处理
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled Rejection:', reason);
+});
 
 let mainWindow = null;
 let tray = null;
@@ -349,6 +362,29 @@ function setupIPC() {
   ipcMain.handle('get-default-folder', async () => {
     const { app } = require('electron');
     return path.join(app.getPath('videos'), '抖音直播录制');
+  });
+
+  // 获取日志文件路径
+  ipcMain.handle('get-log-path', async () => {
+    return logger.getLogPath();
+  });
+
+  // 获取最近的日志内容
+  ipcMain.handle('get-recent-logs', async () => {
+    return logger.getRecentLogs(200);
+  });
+
+  // 打开日志文件所在目录
+  ipcMain.handle('open-log-folder', async () => {
+    const logDir = logger.getLogDir();
+    await shell.openPath(logDir);
+    return { success: true };
+  });
+
+  // 清空日志
+  ipcMain.handle('clear-logs', async () => {
+    const success = logger.clear();
+    return { success };
   });
 }
 

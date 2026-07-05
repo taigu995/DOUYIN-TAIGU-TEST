@@ -6,12 +6,16 @@ const { BrowserWindow } = require('electron');
 const { Recorder } = require('./recorder');
 const { extractUrl, extractInput, extractNameFromText, resolveShortUrl, buildLiveUrl } = require('./douyin-utils');
 const { getConfig, addStream, removeStream, updateStream, getStreams } = require('./config');
+const { getLogger } = require('./logger');
+
+const logger = getLogger();
 
 class StreamManager {
   constructor() {
     // roomId -> { info, recorder, monitorWindow, status, timer }
     this.streams = new Map();
     this.onUpdate = null; // UI 更新回调
+    logger.info('StreamManager initialized');
   }
 
   /**
@@ -35,9 +39,12 @@ class StreamManager {
    * @param {string} inputText - 用户输入（房间号、链接或分享文本）
    */
   async addStreamByInput(inputText) {
+    logger.info(`Adding stream, input: "${inputText.substring(0, 50)}..."`);
+    
     // 1. 智能解析输入
     const parsed = extractInput(inputText);
     if (!parsed) {
+      logger.warn(`Failed to parse input: "${inputText}"`);
       throw new Error('未能识别有效的抖音直播间信息\n支持：房间号(如123456)、分享链接、分享文本');
     }
 
@@ -51,6 +58,7 @@ class StreamManager {
       // 直接输入的房间号
       roomId = parsed.value;
       realUrl = buildLiveUrl(roomId);
+      logger.info(`Direct room ID: ${roomId}`);
     } else {
       // URL 类型，需要解析
       const url = parsed.value;
@@ -58,6 +66,7 @@ class StreamManager {
         const resolved = await resolveShortUrl(url);
         roomId = resolved.roomId;
         realUrl = resolved.realUrl;
+        logger.info(`Resolved short URL to roomId: ${roomId}`);
       } else if (url.includes('live.douyin.com')) {
         const match = url.match(/live\.douyin\.com\/(\d+)/);
         roomId = match ? match[1] : null;
@@ -66,11 +75,13 @@ class StreamManager {
     }
 
     if (!roomId) {
+      logger.error('Failed to extract roomId from input');
       throw new Error('无法解析直播间ID，请检查输入是否正确');
     }
 
     // 检查是否已添加
     if (this.streams.has(roomId)) {
+      logger.warn(`Stream already exists: ${roomId}`);
       throw new Error(`直播间 ${roomId} 已在列表中`);
     }
 

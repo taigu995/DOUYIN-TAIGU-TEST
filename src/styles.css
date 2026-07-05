@@ -706,6 +706,55 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* ========== 日志查看器 ========== */
+.log-content {
+  background: #0d0d0d;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  height: 400px;
+  overflow-y: auto;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-content .log-line {
+  margin-bottom: 2px;
+}
+
+.log-content .log-line.error {
+  color: var(--danger);
+}
+
+.log-content .log-line.warn {
+  color: #f59e0b;
+}
+
+.log-content .log-line.info {
+  color: var(--text-secondary);
+}
+
+.log-loading {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 40px;
+}
+
+.log-file-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.settings-header-actions {
+  display: flex;
+  gap: 4px;
+}
+
 /* ========== 响应式 ========== */
 @media (max-width: 600px) {
   .settings-panel {

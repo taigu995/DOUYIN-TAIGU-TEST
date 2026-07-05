@@ -31,7 +31,12 @@ const elements = {
   autoStart: document.getElementById('auto-start'),
   minimizeToTray: document.getElementById('minimize-to-tray'),
   launchAtLogin: document.getElementById('launch-at-login'),
-  toastContainer: document.getElementById('toast-container')
+  toastContainer: document.getElementById('toast-container'),
+  btnLogs: document.getElementById('btn-logs'),
+  logPanel: document.getElementById('log-panel'),
+  btnCloseLogs: document.getElementById('btn-close-logs'),
+  btnRefreshLogs: document.getElementById('btn-refresh-logs'),
+  btnOpenLogFile: document.getElementById('btn-open-log-file')
 };
 
 // 当前直播间数据
@@ -149,6 +154,12 @@ function bindEvents() {
       }
     }
   });
+
+  // 日志查看器事件
+  elements.btnLogs.addEventListener('click', showLogPanel);
+  elements.btnCloseLogs.addEventListener('click', hideLogPanel);
+  elements.btnRefreshLogs.addEventListener('click', loadLogs);
+  elements.btnOpenLogFile.addEventListener('click', openLogFile);
 }
 
 // ========== 添加直播间 ==========
@@ -200,6 +211,65 @@ async function handleSaveSettings() {
     showToast('设置已保存', 'success');
   }
   elements.settingsPanel.style.display = 'none';
+}
+
+// ========== 日志查看器 ==========
+async function showLogPanel() {
+  elements.logPanel.style.display = 'flex';
+  await loadLogs();
+}
+
+function hideLogPanel() {
+  elements.logPanel.style.display = 'none';
+}
+
+async function loadLogs() {
+  const logContent = document.getElementById('log-content');
+  const logFilePath = document.getElementById('log-file-path');
+  
+  if (!isElectron) {
+    logContent.innerHTML = '<p class="log-loading">日志功能仅在桌面应用中可用</p>';
+    return;
+  }
+
+  logContent.innerHTML = '<p class="log-loading">加载中...</p>';
+  
+  try {
+    const result = await window.electronAPI.getLogContent();
+    logFilePath.textContent = result.path;
+    
+    if (!result.content) {
+      logContent.innerHTML = '<p class="log-loading">暂无日志记录</p>';
+      return;
+    }
+
+    // Parse and colorize log lines
+    const lines = result.content.split('\n');
+    const html = lines.map(line => {
+      let cls = 'info';
+      if (line.includes('[ERROR]')) cls = 'error';
+      else if (line.includes('[WARN]')) cls = 'warn';
+      return `<div class="log-line ${cls}">${escapeHtml(line)}</div>`;
+    }).join('');
+    
+    logContent.innerHTML = html;
+    // Scroll to bottom
+    logContent.scrollTop = logContent.scrollHeight;
+  } catch (err) {
+    logContent.innerHTML = `<p class="log-loading">加载日志失败: ${err.message}</p>`;
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+async function openLogFile() {
+  if (isElectron) {
+    await window.electronAPI.openLogFile();
+  }
 }
 
 // ========== 渲染直播间列表 ==========
