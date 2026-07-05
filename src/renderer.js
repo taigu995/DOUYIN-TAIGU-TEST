@@ -470,7 +470,20 @@ window.handleToggleAutoRecord = async function (roomId) {
 
 // 查看录制记录
 window.handleViewHistory = async function (roomId) {
-  if (!isElectron) return;
+  if (!isElectron) {
+    // 预览环境模拟数据
+    const stream = streamsData.find(s => s.roomId === roomId);
+    showHistoryModal({
+      streamerName: stream?.streamerName || '未知主播',
+      roomId: roomId,
+      currentRecording: stream?.isRecording ? { startTime: new Date().toISOString() } : null,
+      history: [
+        { startTime: '2026-07-05T10:00:00.000Z', endTime: '2026-07-05T12:30:00.000Z', fileSize: 156000000 },
+        { startTime: '2026-07-04T19:00:00.000Z', endTime: '2026-07-04T21:15:00.000Z', fileSize: 89500000 }
+      ]
+    });
+    return;
+  }
   try {
     const result = await window.electronAPI.getRecordingHistory(roomId);
     showHistoryModal(result);
