@@ -393,11 +393,20 @@ class StreamManager {
     });
 
     streamState.recorder = recorder;
-    streamState.status = 'recording';
-    streamState.currentRecordingStart = Date.now();
-    this.notifyUpdate();
 
-    await recorder.startRecording();
+    try {
+      await recorder.startRecording();
+      streamState.status = 'recording';
+      streamState.currentRecordingStart = Date.now();
+      this.notifyUpdate();
+    } catch (err) {
+      logger.error(`Failed to start recording for ${streamState.info.streamerName}: ${err.message}`);
+      streamState.status = 'error';
+      streamState.recorder = null;
+      recorder.destroy();
+      this.notifyUpdate();
+      throw err;
+    }
   }
 
   /**
@@ -463,6 +472,44 @@ class StreamManager {
     logger.info(`[StreamManager] 切换自动录制: ${roomId} -> ${state.info.autoRecord}`);
     this.notifyUpdate();
     return state.info.autoRecord;
+  }
+
+  /**
+   * 获取录制历史记录
+   * @param {string} roomId 房间ID
+   * @returns {object} 录制历史数据
+   */
+  getRecordingHistory(roomId) {
+    const state = this.streams.get(roomId);
+    if (!state) {
+      return {
+        roomId: roomId,
+        streamerName: '未知主播',
+        currentRecording: null,
+        history: []
+      };
+    }
+
+    // 获取当前录制信息（如果正在录制）
+    let currentRecording = null;
+    if (state.recorder && state.recorder.recording) {
+      currentRecording = {
+        startTime: state.recorder.startTime || new Date().toISOString(),
+        duration: state.recorder.startTime 
+          ? Math.floor((Date.now() - new Date(state.recorder.startTime).getTime()) / 1000)
+          : 0
+      };
+    }
+
+    // 获取历史记录
+    const history = state.info.recordingHistory || [];
+
+    return {
+      roomId: state.info.roomId,
+      streamerName: state.info.streamerName || '未知主播',
+      currentRecording: currentRecording,
+      history: history
+    };
   }
 
   /**

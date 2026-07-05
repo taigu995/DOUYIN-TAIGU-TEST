@@ -109,49 +109,62 @@ class Recorder {
    * 开始录制
    */
   async startRecording() {
-    if (this.recording) return;
+    if (this.recording) {
+      logger.warn(`Already recording for room ${this.roomId}`);
+      return;
+    }
 
     logger.info(`Starting recording for room ${this.roomId}, streamer: ${this.streamerName}`);
 
-    const config = getConfig();
-    const baseOutputFolder = this.outputFolder || config.outputFolder || this.getDefaultOutputFolder();
+    try {
+      const config = getConfig();
+      const baseOutputFolder = this.outputFolder || config.outputFolder || this.getDefaultOutputFolder();
 
-    // 按主播名称创建子文件夹
-    const streamerFolder = path.join(baseOutputFolder, this.streamerName);
+      // 按主播名称创建子文件夹
+      const streamerFolder = path.join(baseOutputFolder, this.streamerName);
 
-    // 确保输出目录存在（包括主播子文件夹）
-    if (!fs.existsSync(streamerFolder)) {
-      fs.mkdirSync(streamerFolder, { recursive: true });
+      // 确保输出目录存在（包括主播子文件夹）
+      if (!fs.existsSync(streamerFolder)) {
+        fs.mkdirSync(streamerFolder, { recursive: true });
+      }
+
+      // 生成文件名
+      const fileName = generateFileName(this.streamerName);
+      this.outputFile = path.join(streamerFolder, `${fileName}.${config.fileFormat || 'mp4'}`);
+      this.startTime = new Date();
+      this.frameCount = 0;
+
+      logger.info(`Output file: ${this.outputFile}`);
+
+      // 创建捕获窗口（如果还没创建）
+      if (!this.captureWindow || this.captureWindow.isDestroyed()) {
+        await this.createCaptureWindow();
+      }
+
+      // 启动 FFmpeg 编码进程
+      this.startFFmpegProcess(config.fps || 30);
+
+      // 开始捕获帧
+      this.recording = true;
+      this.startCapture();
+
+      this.onStatusChange('recording', {
+        roomId: this.roomId,
+        streamerName: this.streamerName,
+        outputFile: this.outputFile,
+        startTime: this.startTime
+      });
+
+      console.log(`[Recorder] 开始录制: ${this.streamerName} -> ${this.outputFile}`);
+    } catch (err) {
+      logger.error(`Failed to start recording: ${err.message}`);
+      this.recording = false;
+      this.onStatusChange('error', {
+        roomId: this.roomId,
+        error: err.message
+      });
+      throw err;
     }
-
-    // 生成文件名
-    const fileName = generateFileName(this.streamerName);
-    this.outputFile = path.join(streamerFolder, `${fileName}.${config.fileFormat || 'mp4'}`);
-    this.startTime = new Date();
-    this.frameCount = 0;
-
-    logger.info(`Output file: ${this.outputFile}`);
-
-    // 创建捕获窗口（如果还没创建）
-    if (!this.captureWindow || this.captureWindow.isDestroyed()) {
-      await this.createCaptureWindow();
-    }
-
-    // 启动 FFmpeg 编码进程
-    this.startFFmpegProcess(config.fps || 30);
-
-    // 开始捕获帧
-    this.recording = true;
-    this.startCapture();
-
-    this.onStatusChange('recording', {
-      roomId: this.roomId,
-      streamerName: this.streamerName,
-      outputFile: this.outputFile,
-      startTime: this.startTime
-    });
-
-    console.log(`[Recorder] 开始录制: ${this.streamerName} -> ${this.outputFile}`);
   }
 
   /**

@@ -394,6 +394,11 @@ function setupIPC() {
     return logger.getRecentLogs(200);
   });
 
+  // 获取日志文件内容（兼容旧接口）
+  ipcMain.handle('get-log-content', async () => {
+    return logger.getRecentLogs(500);
+  });
+
   // 打开日志文件所在目录
   ipcMain.handle('open-log-folder', async () => {
     const logDir = logger.getLogDir();
