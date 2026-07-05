@@ -14,7 +14,45 @@ const { getLogger } = require('./logger');
 
 const logger = getLogger();
 
-ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+// 获取 FFmpeg 可执行文件路径（处理 asar 打包情况）
+function getFFmpegPath() {
+  let ffmpegPath = ffmpegInstaller.path;
+  
+  // 在 asar 打包后，二进制文件在 app.asar.unpacked 目录
+  if (ffmpegPath.includes('app.asar') && !ffmpegPath.includes('app.asar.unpacked')) {
+    ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+  }
+  
+  // 验证路径是否存在
+  if (!fs.existsSync(ffmpegPath)) {
+    logger.error(`FFmpeg 路径不存在: ${ffmpegPath}`);
+    // 尝试在应用目录查找
+    const appDir = path.dirname(process.execPath);
+    const possiblePaths = [
+      path.join(appDir, 'resources', 'app.asar.unpacked', 'node_modules', '@ffmpeg-installer', 'ffmpeg'),
+      path.join(appDir, 'resources', 'app', 'node_modules', '@ffmpeg-installer', 'ffmpeg')
+    ];
+    
+    for (const p of possiblePaths) {
+      try {
+        const altPath = require(path.join(p, 'package.json'));
+        if (altPath && altPath.path) {
+          const resolved = path.resolve(p, altPath.path);
+          if (fs.existsSync(resolved)) {
+            logger.info(`找到备用 FFmpeg 路径: ${resolved}`);
+            return resolved;
+          }
+        }
+      } catch (e) { /* ignore */ }
+    }
+  }
+  
+  logger.info(`FFmpeg 路径: ${ffmpegPath}`);
+  return ffmpegPath;
+}
+
+const ffmpegPath = getFFmpegPath();
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 class Recorder {
   constructor(options) {
@@ -203,9 +241,10 @@ class Recorder {
       this.outputFile
     ];
 
-    const ffmpegPath = ffmpegInstaller.path;
+    const resolvedPath = getFFmpegPath();
     const { spawn } = require('child_process');
-    this.ffmpegProcess = spawn(ffmpegPath, args, {
+    logger.info(`[Recorder] 启动 FFmpeg: ${resolvedPath}`);
+    this.ffmpegProcess = spawn(resolvedPath, args, {
       stdio: ['pipe', 'pipe', 'pipe']
     });
 

@@ -24,6 +24,10 @@
     "directories": {
       "output": "dist"
     },
+    "asarUnpack": [
+      "node_modules/@ffmpeg-installer/**/*",
+      "node_modules/fluent-ffmpeg/**/*"
+    ],
     "win": {
       "target": [
         {
@@ -38,7 +42,7 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "\u6296\u97f3\u76f4\u64ad\u5f55\u5236"
+      "shortcutName": "抖音直播录制"
     },
     "files": [
       "main.js",

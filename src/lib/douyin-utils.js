@@ -7,7 +7,8 @@ const { net } = require('electron');
 /**
  * 从用户输入中提取抖音链接或房间号
  * 支持格式：
- * - 纯房间号：123456789
+ * - 纯数字房间号：123456789
+ * - 字母/数字/下划线房间号：MiaoJiu233, abc_123
  * - 短链接：https://v.douyin.com/xxxxx/
  * - 直播链接：https://live.douyin.com/XXXXXXX
  * - 用户主页：https://www.douyin.com/user/xxxxx
@@ -20,15 +21,24 @@ function extractInput(input) {
 
   const trimmed = input.trim();
 
-  // 1. 纯数字 → 房间号
+  // 1. 纯数字 → 房间号 (5~15位)
   if (/^\d{5,15}$/.test(trimmed)) {
     return { type: 'roomId', value: trimmed };
   }
 
-  // 2. 从文本中提取URL
+  // 2. 字母+数字+下划线组合 → 房间号 (抖音支持字母房间号)
+  //    至少包含一个字母，长度3~30，仅允许字母数字下划线
+  if (/^[A-Za-z][A-Za-z0-9_]{2,29}$/.test(trimmed) || /^[A-Za-z0-9_]{3,30}$/.test(trimmed)) {
+    // 排除看起来像URL片段的输入
+    if (!trimmed.includes('.') && !trimmed.includes('/') && !trimmed.includes(':')) {
+      return { type: 'roomId', value: trimmed };
+    }
+  }
+
+  // 3. 从文本中提取URL
   const urlPatterns = [
     /https?:\/\/v\.douyin\.com\/[A-Za-z0-9]+\/?/g,
-    /https?:\/\/live\.douyin\.com\/\d+/g,
+    /https?:\/\/live\.douyin\.com\/[A-Za-z0-9_]+/g,
     /https?:\/\/www\.douyin\.com\/user\/[A-Za-z0-9_-]+/g
   ];
 
@@ -39,8 +49,8 @@ function extractInput(input) {
     }
   }
 
-  // 3. 检查是否包含 live.douyin.com 的纯数字ID（如输入 "live.douyin.com/123456"）
-  const liveMatch = trimmed.match(/live\.douyin\.com\/(\d+)/);
+  // 4. 检查是否包含 live.douyin.com 的ID（数字或字母）
+  const liveMatch = trimmed.match(/live\.douyin\.com\/([A-Za-z0-9_]+)/);
   if (liveMatch) {
     return { type: 'roomId', value: liveMatch[1] };
   }
@@ -86,7 +96,7 @@ function resolveShortUrl(shortUrl) {
 
       request.on('redirect', (statusCode, method, redirectUrl) => {
         request.abort();
-        const roomIdMatch = redirectUrl.match(/live\.douyin\.com\/(\d+)/);
+        const roomIdMatch = redirectUrl.match(/live\.douyin\.com\/([A-Za-z0-9_]+)/);
         if (roomIdMatch) {
           resolve({ roomId: roomIdMatch[1], realUrl: redirectUrl });
         } else {
@@ -101,7 +111,7 @@ function resolveShortUrl(shortUrl) {
           const location = response.headers['location'];
           const loc = Array.isArray(location) ? location[0] : location;
           if (loc) {
-            const roomIdMatch = loc.match(/live\.douyin\.com\/(\d+)/);
+            const roomIdMatch = loc.match(/live\.douyin\.com\/([A-Za-z0-9_]+)/);
             if (roomIdMatch) {
               resolve({ roomId: roomIdMatch[1], realUrl: loc });
               return;
@@ -109,7 +119,7 @@ function resolveShortUrl(shortUrl) {
           }
         }
         // 如果直接返回200，尝试从URL解析
-        const roomIdMatch = shortUrl.match(/live\.douyin\.com\/(\d+)/);
+        const roomIdMatch = shortUrl.match(/live\.douyin\.com\/([A-Za-z0-9_]+)/);
         resolve({
           roomId: roomIdMatch ? roomIdMatch[1] : null,
           realUrl: shortUrl
@@ -129,7 +139,7 @@ function resolveShortUrl(shortUrl) {
       request.end();
     } else {
       // 直接链接，提取roomId
-      const roomIdMatch = shortUrl.match(/live\.douyin\.com\/(\d+)/);
+      const roomIdMatch = shortUrl.match(/live\.douyin\.com\/([A-Za-z0-9_]+)/);
       resolve({
         roomId: roomIdMatch ? roomIdMatch[1] : null,
         realUrl: shortUrl

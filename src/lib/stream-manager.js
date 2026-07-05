@@ -236,16 +236,21 @@ class StreamManager {
    * 检查直播状态
    */
   async checkLiveStatus(streamState) {
-    const { monitorWindow, info } = streamState;
-
-    if (!monitorWindow || monitorWindow.isDestroyed()) {
-      logger.warn(`[Monitor] 监控窗口已销毁，重新创建: ${info.roomId}`);
-      // 重新创建监控窗口
-      await this.createMonitorWindow(streamState);
+    // 防止并发检查
+    if (streamState._checking) {
       return;
     }
+    streamState._checking = true;
 
     try {
+      const { monitorWindow, info } = streamState;
+
+      if (!monitorWindow || monitorWindow.isDestroyed()) {
+        logger.warn(`[Monitor] 监控窗口已销毁，重新创建: ${info.roomId}`);
+        await this.createMonitorWindow(streamState);
+        return;
+      }
+
       // 重新加载页面以获取最新状态
       logger.info(`[Monitor] 检查直播状态: ${info.streamerName} (${info.roomId})`);
       await monitorWindow.loadURL(info.liveUrl, {
@@ -254,6 +259,11 @@ class StreamManager {
 
       // 等待页面加载
       await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // 再次检查窗口是否仍然可用
+      if (monitorWindow.isDestroyed()) {
+        return;
+      }
 
       // 检测是否在直播
       const isLive = await monitorWindow.webContents.executeJavaScript(`
@@ -287,22 +297,46 @@ class StreamManager {
       // 尝试获取主播名称（如果还没有）
       if (!streamState.info.streamerName || streamState.info.streamerName.startsWith('主播')) {
         try {
-          const name = await monitorWindow.webContents.executeJavaScript(`
-            (function() {
-              const nameEl = document.querySelector('[class*="nickname"], [class*="author"]');
-              if (nameEl) return nameEl.textContent.trim();
-              const title = document.title;
-              if (title && title.includes('的直播间')) {
-                return title.split('的直播间')[0].trim();
-              }
-              return null;
-            })();
-          `);
-          if (name) {
-            streamState.info.streamerName = name;
-            updateStream(info.roomId, { streamerName: name });
+          if (!monitorWindow.isDestroyed()) {
+            const name = await monitorWindow.webContents.executeJavaScript(`
+              (function() {
+                // 尝试多种选择器获取主播名称
+                const selectors = [
+                  '[class*="nickname"]',
+                  '[class*="author-name"]',
+                  '[class*="anchor-name"]',
+                  '[data-e2e="live-anchor-name"]',
+                  '.room-info .name'
+                ];
+                for (const sel of selectors) {
+                  const el = document.querySelector(sel);
+                  if (el && el.textContent.trim()) {
+                    return el.textContent.trim();
+                  }
+                }
+                const title = document.title;
+                if (title && title.includes('的直播间')) {
+                  return title.split('的直播间')[0].trim();
+                }
+                // 尝试从页面中获取任何可能的用户名
+                const allNames = document.querySelectorAll('[class*="name"]');
+                for (const el of allNames) {
+                  const text = el.textContent.trim();
+                  if (text && text.length > 1 && text.length < 20 && !text.includes('直播')) {
+                    return text;
+                  }
+                }
+                return null;
+              })();
+            `);
+            if (name) {
+              streamState.info.streamerName = name;
+              updateStream(info.roomId, { streamerName: name });
+            }
           }
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+          logger.warn(`[Monitor] 获取主播名称失败: ${e.message}`);
+        }
       }
 
       const wasLive = streamState.isLive;
@@ -350,9 +384,15 @@ class StreamManager {
 
       this.notifyUpdate();
     } catch (e) {
-      logger.error(`[Monitor] 检查状态出错 (${info.streamerName}, ${info.roomId}): ${e.message}`, e);
-      streamState.status = 'error';
+      if (e.message && e.message.includes('destroyed')) {
+        logger.warn(`[Monitor] 窗口已销毁，跳过检查: ${e.message}`);
+      } else {
+        logger.error(`[Monitor] 检查状态出错 (${streamState.info.streamerName}, ${streamState.info.roomId}): ${e.message}`, e);
+        streamState.status = 'error';
+      }
       this.notifyUpdate();
+    } finally {
+      streamState._checking = false;
     }
   }
 
