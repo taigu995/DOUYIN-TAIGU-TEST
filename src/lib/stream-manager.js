@@ -69,7 +69,7 @@ class StreamManager {
         realUrl = resolved.realUrl;
         logger.info(`Resolved short URL to roomId: ${roomId}`);
       } else if (url.includes('live.douyin.com')) {
-        const match = url.match(/live\.douyin\.com\/(\d+)/);
+        const match = url.match(/live\.douyin\.com\/([A-Za-z0-9_]+)/);
         roomId = match ? match[1] : null;
         realUrl = url;
       }
