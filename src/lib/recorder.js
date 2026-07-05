@@ -109,16 +109,19 @@ class Recorder {
     if (this.recording) return;
 
     const config = getConfig();
-    const outputFolder = this.outputFolder || config.outputFolder || this.getDefaultOutputFolder();
+    const baseOutputFolder = this.outputFolder || config.outputFolder || this.getDefaultOutputFolder();
 
-    // 确保输出目录存在
-    if (!fs.existsSync(outputFolder)) {
-      fs.mkdirSync(outputFolder, { recursive: true });
+    // 按主播名称创建子文件夹
+    const streamerFolder = path.join(baseOutputFolder, this.streamerName);
+
+    // 确保输出目录存在（包括主播子文件夹）
+    if (!fs.existsSync(streamerFolder)) {
+      fs.mkdirSync(streamerFolder, { recursive: true });
     }
 
     // 生成文件名
     const fileName = generateFileName(this.streamerName);
-    this.outputFile = path.join(outputFolder, `${fileName}.${config.fileFormat || 'mp4'}`);
+    this.outputFile = path.join(streamerFolder, `${fileName}.${config.fileFormat || 'mp4'}`);
     this.startTime = new Date();
     this.frameCount = 0;
 
