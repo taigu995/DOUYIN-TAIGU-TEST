@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>抖音直播录制工具</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <!-- 顶部标题栏 -->
+    <header class="header">
+      <div class="header-left">
+        <div class="logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+          </svg>
+        </div>
+        <h1>抖音直播录制工具</h1>
+      </div>
+      <div class="header-right">
+        <button id="btn-login" class="btn btn-ghost" title="登录抖音账号">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+          登录抖音
+        </button>
+        <button id="btn-settings" class="btn btn-ghost" title="设置">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 添加直播间区域 -->
+    <section class="add-section">
+      <div class="add-input-group">
+        <textarea
+          id="input-url"
+          class="input-url"
+          placeholder="粘贴抖音直播间链接或分享文本，例如：&#10;https://v.douyin.com/xxxxx/&#10;或分享文本：#在抖音，记录美好生活#【主播名】正在直播... https://v.douyin.com/xxxxx/"
+          rows="3"
+        ></textarea>
+        <button id="btn-add" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          添加直播间
+        </button>
+      </div>
+      <div id="add-error" class="error-msg" style="display:none;"></div>
+    </section>
+
+    <!-- 直播间列表 -->
+    <section class="streams-section">
+      <div class="section-header">
+        <h2>直播间列表</h2>
+        <span id="stream-count" class="badge">0 个直播间</span>
+      </div>
+
+      <div id="streams-list" class="streams-list">
+        <!-- 空状态 -->
+        <div id="empty-state" class="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+          </svg>
+          <p>暂无直播间，请粘贴抖音直播链接添加</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 设置面板 -->
+    <section id="settings-panel" class="settings-panel" style="display:none;">
+      <div class="settings-header">
+        <h2>设置</h2>
+        <button id="btn-close-settings" class="btn btn-ghost btn-sm">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="settings-body">
+        <div class="setting-item">
+          <label>录制文件保存位置</label>
+          <div class="setting-row">
+            <input type="text" id="output-folder" class="input-text" placeholder="请选择保存位置" readonly>
+            <button id="btn-browse" class="btn btn-secondary btn-sm">浏览...</button>
+          </div>
+        </div>
+        <div class="setting-item">
+          <label>直播状态检测间隔（秒）</label>
+          <input type="number" id="check-interval" class="input-text" min="10" max="300" value="30">
+        </div>
+        <div class="setting-item">
+          <label>录制帧率（FPS）</label>
+          <input type="number" id="fps" class="input-text" min="15" max="60" value="30">
+        </div>
+        <div class="setting-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="auto-start" checked>
+            <span>检测到开播自动开始录制</span>
+          </label>
+        </div>
+        <div class="setting-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="minimize-to-tray" checked>
+            <span>关闭窗口时最小化到系统托盘</span>
+          </label>
+        </div>
+        <div class="settings-actions">
+          <button id="btn-save-settings" class="btn btn-primary">保存设置</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 状态栏 -->
+    <footer class="footer">
+      <div class="footer-left">
+        <span id="status-text">就绪</span>
+      </div>
+      <div class="footer-right">
+        <span id="recording-count">录制中: 0</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Toast 通知 -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
