@@ -166,7 +166,7 @@ class Recorder {
 
   /**
    * 注入 CSS 防止页面滚动，确保捕获区域固定
-   * 只防止滚动，不隐藏任何元素
+   * 强制页面内容限制在视口范围内
    */
   async injectNoScrollCSS() {
     if (!this.captureWindow || this.captureWindow.isDestroyed()) return;
@@ -180,11 +180,24 @@ class Recorder {
           const style = document.createElement('style');
           style.setAttribute('data-recorder', 'true');
           style.textContent = \`
-            /* 防止滚动但保持所有内容可见 */
+            /* 强制 html/body 严格限制在视口大小 */
             html, body {
+              width: 100vw !important;
+              height: 100vh !important;
+              max-width: 100vw !important;
+              max-height: 100vh !important;
               overflow: hidden !important;
               margin: 0 !important;
               padding: 0 !important;
+              position: fixed !important;
+              top: 0 !important;
+              left: 0 !important;
+            }
+            
+            /* 所有直接子元素也限制在视口内 */
+            body > * {
+              max-height: 100vh !important;
+              overflow: hidden !important;
             }
             
             /* 隐藏滚动条 */
@@ -198,7 +211,7 @@ class Recorder {
           document.documentElement.scrollTop = 0;
           document.body.scrollTop = 0;
           
-          // 持续阻止滚动
+          // 持续阻止滚动和页面尺寸变化
           const preventScroll = (e) => {
             e.preventDefault();
             window.scrollTo(0, 0);
@@ -206,22 +219,39 @@ class Recorder {
           };
           
           // 移除旧监听器
-          window._recorderScrollHandler && window.removeEventListener('scroll', window._recorderScrollHandler);
+          if (window._recorderScrollHandler) {
+            window.removeEventListener('scroll', window._recorderScrollHandler);
+            window.removeEventListener('wheel', window._recorderScrollHandler);
+            window.removeEventListener('touchmove', window._recorderScrollHandler);
+          }
+          if (window._recorderResizeHandler) {
+            window.removeEventListener('resize', window._recorderResizeHandler);
+          }
+          
           window._recorderScrollHandler = preventScroll;
           window.addEventListener('scroll', preventScroll, { passive: false, capture: true });
           window.addEventListener('wheel', preventScroll, { passive: false, capture: true });
           window.addEventListener('touchmove', preventScroll, { passive: false, capture: true });
           
-          // 定时重置滚动位置
+          // 定时重置滚动位置和尺寸
           if (window._recorderScrollInterval) clearInterval(window._recorderScrollInterval);
           window._recorderScrollInterval = setInterval(() => {
+            // 强制重置滚动
             if (window.scrollY !== 0 || document.documentElement.scrollTop !== 0) {
               window.scrollTo(0, 0);
             }
-          }, 100);
+            // 强制 body 尺寸不超过视口
+            const vh = window.innerHeight;
+            const vw = window.innerWidth;
+            if (document.body.scrollHeight > vh || document.body.scrollWidth > vw) {
+              document.body.style.height = vh + 'px';
+              document.body.style.width = vw + 'px';
+              document.body.style.overflow = 'hidden';
+            }
+          }, 200);
         })();
       `);
-      logger.info('[Recorder] 已注入防滚动 CSS');
+      logger.info('[Recorder] 已注入防滚动 CSS，视口限制生效');
     } catch (e) {
       logger.warn('[Recorder] 注入防滚动 CSS 失败:', e.message);
     }
@@ -393,6 +423,8 @@ class Recorder {
     const config = getConfig();
     const fps = config.fps || 30;
     const interval = Math.floor(1000 / fps);
+    const CAPTURE_WIDTH = 1920;
+    const CAPTURE_HEIGHT = 1080;
 
     this._captureInterval = setInterval(async () => {
       if (!this.recording || !this.captureWindow || this.captureWindow.isDestroyed()) {
@@ -401,7 +433,38 @@ class Recorder {
 
       try {
         const image = await this.captureWindow.webContents.capturePage();
-        const bitmap = image.getBitmap();
+        
+        // 获取图像实际尺寸
+        const imgSize = image.getSize();
+        let bitmap;
+        
+        if (imgSize.width !== CAPTURE_WIDTH || imgSize.height !== CAPTURE_HEIGHT) {
+          // 图像尺寸不匹配，裁剪到视口大小 (从左上角 0,0 开始)
+          const croppedImage = image.crop({
+            x: 0,
+            y: 0,
+            width: Math.min(imgSize.width, CAPTURE_WIDTH),
+            height: Math.min(imgSize.height, CAPTURE_HEIGHT)
+          });
+          bitmap = croppedImage.getBitmap();
+          
+          // 如果裁剪后尺寸仍然不对（页面内容比视口小），需要填充
+          const expectedSize = CAPTURE_WIDTH * CAPTURE_HEIGHT * 4; // BGRA = 4 bytes per pixel
+          if (bitmap.length < expectedSize) {
+            // 创建全黑帧填充
+            const paddedBuffer = Buffer.alloc(expectedSize, 0);
+            // 逐行复制
+            for (let row = 0; row < Math.min(imgSize.height, CAPTURE_HEIGHT); row++) {
+              const srcOffset = row * imgSize.width * 4;
+              const dstOffset = row * CAPTURE_WIDTH * 4;
+              const rowBytes = Math.min(imgSize.width, CAPTURE_WIDTH) * 4;
+              bitmap.copy(paddedBuffer, dstOffset, srcOffset, srcOffset + rowBytes);
+            }
+            bitmap = paddedBuffer;
+          }
+        } else {
+          bitmap = image.getBitmap();
+        }
 
         // 检查 FFmpeg 进程是否仍在运行且 stdin 可写
         if (this.ffmpegProcess && this.ffmpegProcess.stdin && !this.ffmpegProcess.stdin.destroyed) {
