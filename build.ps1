@@ -232,6 +232,20 @@ if ($buildSuccess) {
         Remove-Item -Recurse -Force $distPath -ErrorAction SilentlyContinue
     }
     
+    # Try to add project directory to Windows Defender exclusions (requires admin)
+    Write-Log "Attempting to add project to Windows Defender exclusions..." "STEP"
+    try {
+        $addExclusionCmd = "Add-MpExclusion -ExclusionPath '$ProjectDir'"
+        $exclusionResult = & powershell -Command "Start-Process powershell -ArgumentList '-Command', '$addExclusionCmd' -Verb RunAs -Wait -WindowStyle Hidden" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log "Added project directory to Defender exclusions" "OK"
+        } else {
+            Write-Log "Could not add exclusion (may need manual admin approval)" "WARN"
+        }
+    } catch {
+        Write-Log "Could not add Defender exclusion: $($_.Exception.Message)" "WARN"
+    }
+    
     Write-Log "Running electron-builder (first build downloads Electron binary)..." "STEP"
     Write-Host "     (If build fails with 'UNKNOWN error', temporarily disable antivirus)" -ForegroundColor DarkYellow
     Write-Host ""
