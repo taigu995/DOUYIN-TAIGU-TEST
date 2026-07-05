@@ -187,11 +187,18 @@ if ($buildSuccess) {
     
     # Approve build scripts for packages that need postinstall (electron, ffmpeg, etc.)
     # Required for pnpm v11+ which blocks build scripts by default
-    Write-Log "Approving build scripts for electron/ffmpeg..." "INFO"
-    try {
-        & pnpm approve-builds electron @ffmpeg-installer/ffmpeg electron-builder 2>&1 | Out-Null
-    } catch {
-        # If approve-builds not available (older pnpm), package.json pnpm config handles it
+    Write-Log "Ensuring .npmrc configuration for pnpm v11+..." "INFO"
+    $npmrcPath = Join-Path $ProjectRoot ".npmrc"
+    if (-not (Test-Path $npmrcPath)) {
+        $npmrcContent = @"
+onlyBuiltDependencies[]=electron
+onlyBuiltDependencies[]=@ffmpeg-installer/ffmpeg
+onlyBuiltDependencies[]=electron-builder
+"@
+        Set-Content -Path $npmrcPath -Value $npmrcContent -Encoding UTF8
+        Write-Log ".npmrc created with build script approvals" "OK"
+    } else {
+        Write-Log ".npmrc already exists" "OK"
     }
     
     Write-Log "Running pnpm install (first time may take several minutes)..." "STEP"
