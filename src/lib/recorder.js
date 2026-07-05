@@ -112,18 +112,61 @@ class Recorder {
     // 等待页面完全加载
     await new Promise(resolve => setTimeout(resolve, 5000));
 
+    // 尝试启动视频播放
+    await this.tryStartVideoPlayback();
+
     // 注入 CSS 防止页面滚动，确保捕获区域固定
     await this.injectNoScrollCSS();
 
-    // 等待 CSS 生效
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // 等待 CSS 生效和视频开始播放
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     return this.captureWindow;
   }
 
   /**
+   * 尝试启动视频播放
+   */
+  async tryStartVideoPlayback() {
+    if (!this.captureWindow || this.captureWindow.isDestroyed()) return;
+
+    try {
+      await this.captureWindow.webContents.executeJavaScript(`
+        (function() {
+          // 尝试找到视频元素并播放
+          const videos = document.querySelectorAll('video');
+          for (const video of videos) {
+            if (video.paused) {
+              video.muted = true; // 静音以允许自动播放
+              video.play().catch(() => {});
+            }
+          }
+          
+          // 尝试点击播放按钮
+          const playBtns = document.querySelectorAll('[class*="play"], [class*="Play"], button[aria-label*="播放"], button[aria-label*="play"]');
+          for (const btn of playBtns) {
+            btn.click();
+          }
+          
+          // 尝试点击弹幕开关（关闭弹幕以获得更清晰的画面）
+          // 注意：如果需要录制弹幕，不要关闭
+          // const danmuBtns = document.querySelectorAll('[class*="danmu"], [class*="barrage"]');
+          // for (const btn of danmuBtns) {
+          //   if (btn.checked || btn.classList.contains('active')) {
+          //     btn.click();
+          //   }
+          // }
+        })();
+      `);
+      logger.info('[Recorder] 已尝试启动视频播放');
+    } catch (e) {
+      logger.warn('[Recorder] 启动视频播放失败:', e.message);
+    }
+  }
+
+  /**
    * 注入 CSS 防止页面滚动，确保捕获区域固定
-   * 强制隐藏所有非视频元素，只保留视频画面
+   * 只防止滚动，不隐藏任何元素
    */
   async injectNoScrollCSS() {
     if (!this.captureWindow || this.captureWindow.isDestroyed()) return;
@@ -131,65 +174,22 @@ class Recorder {
     try {
       await this.captureWindow.webContents.executeJavaScript(`
         (function() {
-          // 移除所有现有样式
+          // 移除旧样式
           document.querySelectorAll('style[data-recorder]').forEach(s => s.remove());
           
           const style = document.createElement('style');
           style.setAttribute('data-recorder', 'true');
           style.textContent = \`
-            /* 强制 html/body 固定大小 */
+            /* 防止滚动但保持所有内容可见 */
             html, body {
               overflow: hidden !important;
-              width: 100vw !important;
-              height: 100vh !important;
               margin: 0 !important;
               padding: 0 !important;
-              position: fixed !important;
-              top: 0 !important;
-              left: 0 !important;
-              scroll-behavior: auto !important;
-            }
-            
-            /* 隐藏所有非视频元素 */
-            body > *:not(video):not([class*="player"]):not([class*="video"]):not([id*="player"]):not([id*="video"]) {
-              display: none !important;
-              visibility: hidden !important;
-              opacity: 0 !important;
-              pointer-events: none !important;
-            }
-            
-            /* 隐藏弹幕、礼物、聊天等覆盖层 */
-            [class*="danmu"], [class*="chat"], [class*="gift"], [class*="comment"],
-            [class*="message"], [class*="barrage"], [class*="reward"], [class*="panel"],
-            [class*="sidebar"], [class*="aside"], [class*="header"], [class*="footer"],
-            [class*="nav"], [class*="menu"], [class*="toolbar"], [class*="control"],
-            [class*="overlay"]:not([class*="player"]), [class*="popup"], [class*="modal"],
-            [class*="dialog"], [class*="toast"], [class*="notice"] {
-              display: none !important;
-            }
-            
-            /* 视频元素填满整个视口 */
-            video {
-              position: fixed !important;
-              top: 0 !important;
-              left: 0 !important;
-              width: 100vw !important;
-              height: 100vh !important;
-              object-fit: cover !important;
-              z-index: 999999 !important;
-              transform: none !important;
-              animation: none !important;
             }
             
             /* 隐藏滚动条 */
             ::-webkit-scrollbar { display: none !important; }
             * { scrollbar-width: none !important; }
-            
-            /* 禁用所有动画和过渡 */
-            * {
-              animation: none !important;
-              transition: none !important;
-            }
           \`;
           document.head.appendChild(style);
           
