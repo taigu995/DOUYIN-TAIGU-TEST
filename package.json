@@ -35,7 +35,7 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "build/icon.ico",
+      "icon": "build/icon.jpeg",
       "signAndEditExecutable": false
     },
     "nsis": {
@@ -49,6 +49,7 @@
       "main.js",
       "preload.js",
       "src/**/*",
+      "build/**/*",
       "node_modules/**/*"
     ]
   }

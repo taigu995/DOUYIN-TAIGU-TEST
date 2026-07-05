@@ -35,12 +35,14 @@ if (!gotTheLock) {
  * 创建主窗口
  */
 function createMainWindow() {
+  const iconPath = path.join(__dirname, 'build', 'icon.jpeg');
   mainWindow = new BrowserWindow({
     width: 900,
     height: 700,
     minWidth: 750,
     minHeight: 500,
     title: '抖音直播录制工具',
+    icon: iconPath,
     resizable: true,
     autoHideMenuBar: true,
     skipTaskbar: false,  // 确保在任务栏显示
@@ -77,10 +79,9 @@ function createMainWindow() {
  * 创建系统托盘
  */
 function createTray() {
-  // 创建一个简单的托盘图标
-  const icon = nativeImage.createFromDataURL(
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAA4ElEQVQ4T2NkoBAwUqifgWoGzPn/n+E/AwMDIwMDQyczA8NMBgaG7cQaAgMDGRgZGBcwMDJMI2QIzACG//8Z5jMwMExgYGDYhs8QmAHIBjEyMk5kYGCYj88lMAOQDUJWw8jIOAmfS2AGoBiEpOY/PpfADMBpEJJBJLkEngbIMkAJJghDyDIAZghMM8wFuAwhywBkQ5ANIcUABnRD8BlClgHYDCHaAGyGEG0ALkOINgCXIUQbgM8Qog3AZwh1DMBjCNEGEDKEaAMIGYLXAFDCJRijWPMBMekYl1qqZGYAFlyJ4LsVe3QAAAAASUVORK5CYII='
-  );
+  // 使用应用图标作为托盘图标
+  const trayIconPath = path.join(__dirname, 'build', 'icon.jpeg');
+  const icon = nativeImage.createFromPath(trayIconPath).resize({ width: 16, height: 16 });
 
   tray = new Tray(icon);
   tray.setToolTip('抖音直播录制工具');
@@ -396,6 +397,7 @@ function setupIPC() {
       width: 1000,
       height: 700,
       title: '登录抖音',
+      icon: path.join(__dirname, 'build', 'icon.jpeg'),
       parent: mainWindow,
       modal: false,
       webPreferences: {
