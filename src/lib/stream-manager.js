@@ -152,22 +152,76 @@ class StreamManager {
       win.loadURL(liveUrl).then(() => {
         setTimeout(async () => {
           try {
-            // 从页面标题或DOM获取主播名称
+            // 从页面标题或DOM获取主播名称（使用更多选择器）
             const name = await win.webContents.executeJavaScript(`
               (function() {
-                // 尝试从页面元素获取
-                const nameEl = document.querySelector('[class*="nickname"], [class*="author"], [class*="userName"]');
-                if (nameEl) return nameEl.textContent.trim();
+                // 尝试多种选择器获取主播名称
+                const selectors = [
+                  // 直播间主播名称
+                  '[data-e2e="live-room-streamer-name"]',
+                  '[class*="streamer-name"]',
+                  '[class*="StreamerName"]',
+                  '[class*="anchor-name"]',
+                  '[class*="AnchorName"]',
+                  '[class*="host-name"]',
+                  '[class*="HostName"]',
+                  // 通用用户名称
+                  '[class*="nickname"]',
+                  '[class*="NickName"]',
+                  '[class*="author"]',
+                  '[class*="Author"]',
+                  '[class*="userName"]',
+                  '[class*="UserName"]',
+                  '[class*="user-name"]',
+                  // 头部信息
+                  'header [class*="name"]',
+                  'header [class*="title"]',
+                  // 直播间信息区域
+                  '[class*="live-info"] [class*="name"]',
+                  '[class*="room-info"] [class*="name"]',
+                  '[class*="streamer"] [class*="name"]'
+                ];
+                
+                for (const sel of selectors) {
+                  const el = document.querySelector(sel);
+                  if (el && el.textContent && el.textContent.trim()) {
+                    const text = el.textContent.trim();
+                    // 排除一些常见的非名称文本
+                    if (text && text !== '关注' && text !== '粉丝' && text.length < 30) {
+                      return text;
+                    }
+                  }
+                }
 
-                // 从title获取
+                // 从title获取（格式通常是"xxx的直播间 - 抖音"）
                 const title = document.title;
-                if (title && title.includes('的直播间')) {
-                  return title.split('的直播间')[0].trim();
+                if (title) {
+                  // 尝试匹配"xxx的直播间"
+                  const match = title.match(/^(.+?)的直播间/);
+                  if (match) return match[1].trim();
+                  
+                  // 尝试匹配"@xxx"
+                  const atMatch = title.match(/@([^\\s]+)/);
+                  if (atMatch) return atMatch[1].trim();
                 }
 
                 // 从meta标签获取
                 const meta = document.querySelector('meta[property="og:title"]');
-                if (meta) return meta.content.trim();
+                if (meta && meta.content) {
+                  const content = meta.content.trim();
+                  const match = content.match(/^(.+?)的直播间/);
+                  if (match) return match[1].trim();
+                  if (content && content.length < 50) return content;
+                }
+                
+                // 从meta description获取
+                const descMeta = document.querySelector('meta[name="description"]');
+                if (descMeta && descMeta.content) {
+                  const content = descMeta.content;
+                  // 尝试从描述中提取主播名
+                  const nameMatch = content.match(/主播[：:]\\s*([^\\s,，]+)/);
+                  if (nameMatch) return nameMatch[1].trim();
+                }
 
                 return null;
               })();

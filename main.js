@@ -219,20 +219,23 @@ function setupIPC() {
       
       // 检查是否有登录相关的cookie
       const hasLoginCookie = cookies.some(c => 
-        c.name === 'sessionid' || c.name === 'sessionid_ss' || c.name === 'login_status'
+        c.name === 'sessionid' || c.name === 'sessionid_ss' || c.name === 'login_status' || c.name === 'passport_auth_status'
       );
       
       if (!hasLoginCookie) {
         return { loggedIn: false, name: '未登录', avatar: null };
       }
 
-      // 优先从cookie中获取用户名（最快最可靠）
+      // 优先从cookie中获取用户名
       let name = '';
       
-      // 尝试从多种cookie中获取用户名
+      // 尝试从多种cookie中获取用户名（按优先级排序）
       const nameCookies = [
-        'passport_fe_name', 'login_name', 'uid_tt_name', 
-        'ssid_ucp_v1', 'ttwid'
+        'passport_fe_name',      // 前端用户名
+        'login_name',            // 登录名
+        'uid_tt_name',           // 用户名
+        'passport_uid_name',     // 用户ID名
+        'ttwid',                 // 设备ID（可能包含用户信息）
       ];
       
       for (const cookieName of nameCookies) {
@@ -241,13 +244,20 @@ function setupIPC() {
           try {
             const decoded = decodeURIComponent(cookie.value);
             // 尝试解析JSON格式
-            if (decoded.startsWith('{')) {
+            if (decoded.startsWith('{') || decoded.startsWith('[')) {
               const parsed = JSON.parse(decoded);
-              if (parsed.name || parsed.nickname) {
-                name = parsed.name || parsed.nickname;
+              if (parsed.name) {
+                name = parsed.name;
+                break;
+              } else if (parsed.nickname) {
+                name = parsed.nickname;
+                break;
+              } else if (parsed.screen_name) {
+                name = parsed.screen_name;
                 break;
               }
-            } else if (decoded && decoded !== 'null' && decoded.length < 50) {
+            } else if (decoded && decoded !== 'null' && decoded !== 'undefined' && decoded.length < 50 && !/^[0-9]+$/.test(decoded)) {
+              // 排除纯数字的cookie值
               name = decoded;
               break;
             }
@@ -255,36 +265,74 @@ function setupIPC() {
         }
       }
 
-      // 如果cookie中没有，尝试从主窗口获取
-      if (!name && mainWindow && !mainWindow.isDestroyed()) {
+      // 如果cookie中没有用户名，尝试从session中获取用户信息
+      if (!name) {
         try {
-          const userInfo = await mainWindow.webContents.executeJavaScript(`
+          // 创建一个临时窗口来获取用户信息
+          const tempWindow = new BrowserWindow({
+            show: false,
+            width: 800,
+            height: 600,
+            webPreferences: {
+              partition: 'persist:douyin',
+              contextIsolation: true,
+              nodeIntegration: false
+            }
+          });
+          
+          // 加载抖音首页
+          await tempWindow.loadURL('https://www.douyin.com');
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          
+          // 从页面中提取用户名
+          const userInfo = await tempWindow.webContents.executeJavaScript(`
             (function() {
-              // 从页面中获取用户名
+              // 尝试多种选择器获取用户名
               const selectors = [
-                '[data-e2e="user-info"] .user-name',
-                '.avatar-wrapper .user-name',
-                'header [class*="name"]',
-                '[class*="UserName"]',
+                // 头部用户信息
+                '[data-e2e="user-info"] [class*="name"]',
+                '[data-e2e="user-info"] span',
+                '.avatar-wrapper [class*="name"]',
+                'header [class*="user-name"]',
+                'header [class*="UserName"]',
+                // 通用用户信息
                 '[class*="nickname"]',
                 '[class*="NickName"]',
-                'span[class*="user"]'
+                '[class*="user-name"]',
+                '[class*="username"]',
+                // 个人主页链接中的用户名
+                'a[href*="/user/"] [class*="name"]'
               ];
               
               for (const sel of selectors) {
                 const el = document.querySelector(sel);
-                if (el && el.textContent.trim()) {
-                  return el.textContent.trim();
+                if (el && el.textContent && el.textContent.trim()) {
+                  const text = el.textContent.trim();
+                  // 排除一些常见的非用户名文本
+                  if (text && text !== '登录' && text !== '注册' && text.length < 30) {
+                    return text;
+                  }
                 }
               }
+              
+              // 尝试从页面标题获取
+              const title = document.title;
+              if (title && title.includes('@')) {
+                const match = title.match(/@([^\\s]+)/);
+                if (match) return match[1];
+              }
+              
               return '';
             })()
           `);
+          
           if (userInfo) {
             name = userInfo;
           }
+          
+          tempWindow.close();
         } catch (e) {
-          logger.warn(`从主窗口获取用户名失败: ${e.message}`);
+          logger.warn(`从页面获取用户名失败: ${e.message}`);
         }
       }
 

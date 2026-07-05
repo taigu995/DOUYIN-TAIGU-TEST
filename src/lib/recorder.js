@@ -78,11 +78,16 @@ class Recorder {
   async createCaptureWindow() {
     const config = getConfig();
 
+    // 固定捕获分辨率为 1920x1080 (16:9)
+    const CAPTURE_WIDTH = 1920;
+    const CAPTURE_HEIGHT = 1080;
+
     this.captureWindow = new BrowserWindow({
-      width: 1920,
-      height: 1080,
+      width: CAPTURE_WIDTH,
+      height: CAPTURE_HEIGHT,
       show: false,            // 不显示窗口
       enableLargerThanScreen: true,
+      frame: false,           // 无边框
       webPreferences: {
         offscreen: true,      // 启用离屏渲染
         javascript: true,
@@ -107,10 +112,58 @@ class Recorder {
     // 等待页面完全加载
     await new Promise(resolve => setTimeout(resolve, 5000));
 
+    // 注入 CSS 防止页面滚动，确保捕获区域固定
+    await this.injectNoScrollCSS();
+
     // 尝试设置最高画质
     await this.setMaxQuality();
 
     return this.captureWindow;
+  }
+
+  /**
+   * 注入 CSS 防止页面滚动，确保捕获区域固定
+   */
+  async injectNoScrollCSS() {
+    if (!this.captureWindow || this.captureWindow.isDestroyed()) return;
+
+    try {
+      await this.captureWindow.webContents.executeJavaScript(`
+        (function() {
+          // 注入 CSS 防止滚动
+          const style = document.createElement('style');
+          style.textContent = \`
+            html, body {
+              overflow: hidden !important;
+              width: 100vw !important;
+              height: 100vh !important;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+            /* 隐藏滚动条 */
+            ::-webkit-scrollbar { display: none !important; }
+            /* 确保视频容器填满 */
+            video {
+              object-fit: contain !important;
+              width: 100% !important;
+              height: 100% !important;
+            }
+          \`;
+          document.head.appendChild(style);
+          
+          // 滚动到顶部
+          window.scrollTo(0, 0);
+          
+          // 禁用滚动事件
+          window.addEventListener('scroll', function(e) {
+            window.scrollTo(0, 0);
+          }, { passive: true });
+        })();
+      `);
+      logger.info('[Recorder] 已注入防滚动 CSS');
+    } catch (e) {
+      logger.warn('[Recorder] 注入防滚动 CSS 失败:', e.message);
+    }
   }
 
   /**
@@ -226,9 +279,11 @@ class Recorder {
    * 启动 FFmpeg 编码进程
    */
   startFFmpegProcess(fps) {
+    // Electron 的 capturePage().getBitmap() 在 Windows 上返回 BGRA 格式
+    // 需要指定正确的输入像素格式
     const args = [
       '-f', 'rawvideo',
-      '-pix_fmt', 'rgba',
+      '-pix_fmt', 'bgra',      // BGRA 格式 (Windows 上 Electron 返回的格式)
       '-s', '1920x1080',
       '-r', String(fps),
       '-i', 'pipe:0',
@@ -243,7 +298,7 @@ class Recorder {
 
     const resolvedPath = getFFmpegPath();
     const { spawn } = require('child_process');
-    logger.info(`[Recorder] 启动 FFmpeg: ${resolvedPath}`);
+    logger.info(`[Recorder] 启动 FFmpeg: ${resolvedPath}, 输入格式: bgra`);
     this.ffmpegProcess = spawn(resolvedPath, args, {
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -287,9 +342,21 @@ class Recorder {
         const image = await this.captureWindow.webContents.capturePage();
         const bitmap = image.getBitmap();
 
+        // 检查 FFmpeg 进程是否仍在运行且 stdin 可写
         if (this.ffmpegProcess && this.ffmpegProcess.stdin && !this.ffmpegProcess.stdin.destroyed) {
-          this.ffmpegProcess.stdin.write(bitmap);
-          this.frameCount++;
+          try {
+            // 检查 stdin 是否可写（防止 write after end 错误）
+            if (this.ffmpegProcess.stdin.writable) {
+              this.ffmpegProcess.stdin.write(bitmap);
+              this.frameCount++;
+            }
+          } catch (writeErr) {
+            // 忽略写入错误，可能是进程正在关闭
+            if (writeErr.code !== 'ERR_STREAM_WRITE_AFTER_END' && 
+                writeErr.code !== 'ERR_STREAM_DESTROYED') {
+              logger.warn('[Recorder] 写入帧数据出错:', writeErr.message);
+            }
+          }
         }
       } catch (err) {
         if (err.message && !err.message.includes('destroyed')) {
