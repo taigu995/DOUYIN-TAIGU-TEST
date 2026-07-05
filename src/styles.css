@@ -1120,6 +1120,13 @@ body {
   background: rgba(91, 155, 213, 0.1);
 }
 
+.about-links-row {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
 /* ========== 响应式 ========== */
 @media (max-width: 600px) {
   .settings-panel {

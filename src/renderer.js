@@ -226,6 +226,18 @@ function bindEvents() {
       }
     });
   }
+
+  const bilibiliLink = document.getElementById('about-bilibili-link');
+  if (bilibiliLink) {
+    bilibiliLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (isElectron) {
+        window.electronAPI.openInBrowser('https://space.bilibili.com/130118337?spm_id_from=333.1007.0.0');
+      } else {
+        window.open('https://space.bilibili.com/130118337?spm_id_from=333.1007.0.0', '_blank');
+      }
+    });
+  }
 }
 
 // ========== 添加直播间 ==========
