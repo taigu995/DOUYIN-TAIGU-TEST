@@ -3,6 +3,7 @@
  * 管理直播间的添加、删除、状态监听和录制控制
  */
 const { BrowserWindow } = require('electron');
+const https = require('https');
 const { Recorder } = require('./recorder');
 const { extractUrl, extractInput, extractNameFromText, resolveShortUrl, buildLiveUrl } = require('./douyin-utils');
 const { getConfig, addStream, removeStream, updateStream, getStreams } = require('./config');
@@ -128,9 +129,60 @@ class StreamManager {
   }
 
   /**
+   * 通过API获取主播名称
+   */
+  async fetchStreamerNameFromAPI(roomId) {
+    return new Promise((resolve) => {
+      const url = `https://live.douyin.com/webcast/room/web/enter/?aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=130.0.0.0&web_rid=${roomId}`;
+      
+      const options = {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': `https://live.douyin.com/${roomId}`,
+        }
+      };
+
+      https.get(url, options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            // 尝试从多个可能的路径获取主播名称
+            const roomInfo = json?.data?.data?.[0];
+            const owner = roomInfo?.owner;
+            const name = owner?.nickname || owner?.name || roomInfo?.nickname;
+            if (name) {
+              logger.info(`[API] 获取主播名称成功: ${name}`);
+              resolve(name);
+            } else {
+              logger.warn(`[API] 未找到主播名称，响应: ${data.substring(0, 200)}`);
+              resolve(null);
+            }
+          } catch (e) {
+            logger.warn(`[API] 解析响应失败: ${e.message}`);
+            resolve(null);
+          }
+        });
+      }).on('error', (e) => {
+        logger.warn(`[API] 请求失败: ${e.message}`);
+        resolve(null);
+      });
+    });
+  }
+
+  /**
    * 获取主播名称（通过加载页面获取）
    */
   async fetchStreamerName(roomId, liveUrl) {
+    // 首先尝试API方式
+    const apiName = await this.fetchStreamerNameFromAPI(roomId);
+    if (apiName) {
+      return apiName;
+    }
+
+    // API失败，使用DOM方式
     return new Promise((resolve) => {
       const win = new BrowserWindow({
         show: false,
@@ -636,10 +688,12 @@ class StreamManager {
     // 获取当前录制信息（如果正在录制）
     let currentRecording = null;
     if (state.recorder && state.recorder.recording) {
+      const startTime = state.recorder.startTime;
+      const startTimeStr = startTime instanceof Date ? startTime.toISOString() : (startTime || new Date().toISOString());
       currentRecording = {
-        startTime: state.recorder.startTime || new Date().toISOString(),
-        duration: state.recorder.startTime 
-          ? Math.floor((Date.now() - new Date(state.recorder.startTime).getTime()) / 1000)
+        startTime: startTimeStr,
+        duration: startTime 
+          ? Math.floor((Date.now() - new Date(startTime).getTime()) / 1000)
           : 0
       };
     }
