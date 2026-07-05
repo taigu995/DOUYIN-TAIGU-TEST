@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 切换自动录制开关
   toggleAutoRecord: (roomId) => ipcRenderer.invoke('toggle-auto-record', roomId),
 
+  // 获取录制记录
+  getRecordingHistory: (roomId) => ipcRenderer.invoke('get-recording-history', roomId),
+
   // 开始录制
   startRecording: (roomId) => ipcRenderer.invoke('start-recording', roomId),
 

@@ -250,10 +250,22 @@ class Recorder {
       return new Promise((resolve) => {
         this.ffmpegProcess.stdin.end();
         this.ffmpegProcess.on('close', () => {
+          // 获取文件大小
+          let fileSize = 0;
+          try {
+            if (this.outputFile && fs.existsSync(this.outputFile)) {
+              const stats = fs.statSync(this.outputFile);
+              fileSize = stats.size;
+            }
+          } catch (e) {
+            logger.warn('Failed to get file size:', e.message);
+          }
+          
           this.onStatusChange('stopped', {
             roomId: this.roomId,
             streamerName: this.streamerName,
             outputFile: this.outputFile,
+            fileSize: fileSize,
             duration: Date.now() - (this.startTime ? this.startTime.getTime() : Date.now()),
             frameCount: this.frameCount
           });
@@ -273,7 +285,8 @@ class Recorder {
     this.onStatusChange('stopped', {
       roomId: this.roomId,
       streamerName: this.streamerName,
-      outputFile: this.outputFile
+      outputFile: this.outputFile,
+      fileSize: 0
     });
   }
 

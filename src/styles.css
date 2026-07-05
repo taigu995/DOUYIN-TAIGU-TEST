@@ -809,6 +809,134 @@ body {
   gap: 4px;
 }
 
+/* ========== 录制记录弹窗 ========== */
+.history-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.history-modal-content {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 500px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.history-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.history-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.history-close-btn:hover {
+  color: var(--text-primary);
+}
+
+.history-current {
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.history-current-label {
+  font-size: 11px;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.history-current-time {
+  font-size: 14px;
+  color: var(--text-primary);
+  font-family: monospace;
+}
+
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 400px;
+}
+
+.history-item {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.history-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.history-item-index {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.history-item-size {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.history-item-times {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.history-item-times span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-item-times .label {
+  color: var(--text-muted);
+  min-width: 60px;
+}
+
+.history-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px;
+}
+
 /* ========== 响应式 ========== */
 @media (max-width: 600px) {
   .settings-panel {

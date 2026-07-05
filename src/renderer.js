@@ -460,6 +460,136 @@ window.handleToggleAutoRecord = async function (roomId) {
   }
 };
 
+// 查看录制记录
+window.handleViewHistory = async function (roomId) {
+  if (!isElectron) return;
+  try {
+    const result = await window.electronAPI.getRecordingHistory(roomId);
+    showHistoryModal(result);
+  } catch (err) {
+    showToast('获取记录出错: ' + err.message, 'error');
+  }
+};
+
+// 显示录制记录弹窗
+function showHistoryModal(data) {
+  // 移除已存在的弹窗
+  const existing = document.getElementById('history-modal');
+  if (existing) existing.remove();
+
+  const { streamerName, roomId, currentRecording, history } = data;
+
+  // 格式化文件大小
+  const formatSize = (bytes) => {
+    if (!bytes) return '-';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  };
+
+  // 格式化时间
+  const formatTime = (timestamp) => {
+    if (!timestamp) return '-';
+    const d = new Date(timestamp);
+    return d.toLocaleString('zh-CN', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+  };
+
+  // 当前录制信息
+  let currentHtml = '';
+  if (currentRecording) {
+    const startTime = formatTime(currentRecording.startTime);
+    currentHtml = `
+      <div class="history-current">
+        <div class="history-current-title">
+          <span class="recording-dot"></span>
+          正在录制中
+        </div>
+        <div class="history-current-info">
+          <span>开始时间: ${startTime}</span>
+          <span id="current-duration">已录制: 00:00:00</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // 历史记录列表
+  let historyHtml = '';
+  if (history && history.length > 0) {
+    historyHtml = history.map((record, index) => `
+      <div class="history-record">
+        <div class="history-record-index">#${history.length - index}</div>
+        <div class="history-record-info">
+          <div class="history-record-time">
+            <span>开始: ${formatTime(record.startTime)}</span>
+            <span>结束: ${formatTime(record.endTime)}</span>
+          </div>
+          <div class="history-record-size">文件大小: ${formatSize(record.fileSize)}</div>
+        </div>
+      </div>
+    `).join('');
+  } else {
+    historyHtml = '<div class="history-empty">暂无录制记录</div>';
+  }
+
+  const modal = document.createElement('div');
+  modal.id = 'history-modal';
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal-content history-modal-content">
+      <div class="modal-header">
+        <h3>${streamerName} - 录制记录</h3>
+        <button class="modal-close" onclick="closeHistoryModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="history-room-info">房间号: ${roomId}</div>
+        ${currentHtml}
+        <div class="history-list-title">历史录制记录 (${history ? history.length : 0})</div>
+        <div class="history-list">
+          ${historyHtml}
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  // 点击遮罩关闭
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeHistoryModal();
+  });
+
+  // 更新录制时长
+  if (currentRecording) {
+    updateCurrentDuration(currentRecording.startTime);
+  }
+}
+
+// 更新当前录制时长
+function updateCurrentDuration(startTime) {
+  const durationEl = document.getElementById('current-duration');
+  if (!durationEl) return;
+
+  const update = () => {
+    if (!document.getElementById('history-modal')) return;
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const hours = Math.floor(elapsed / 3600);
+    const minutes = Math.floor((elapsed % 3600) / 60);
+    const seconds = elapsed % 60;
+    durationEl.textContent = `已录制: ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    requestAnimationFrame(update);
+  };
+  update();
+}
+
+// 关闭录制记录弹窗
+window.closeHistoryModal = function () {
+  const modal = document.getElementById('history-modal');
+  if (modal) modal.remove();
+};
+
 // ========== 工具函数 ==========
 function showError(msg) {
   elements.addError.textContent = msg;

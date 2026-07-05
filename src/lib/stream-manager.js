@@ -358,8 +358,30 @@ class StreamManager {
       onStatusChange: (status, data) => {
         if (status === 'recording') {
           streamState.status = 'recording';
+          // 记录当前录制开始时间
+          streamState.currentRecordingStart = Date.now();
         } else if (status === 'stopped') {
           streamState.status = streamState.isLive ? 'live' : 'offline';
+          // 保存录制记录
+          if (streamState.currentRecordingStart && data && data.outputFile) {
+            const record = {
+              startTime: streamState.currentRecordingStart,
+              endTime: Date.now(),
+              outputFile: data.outputFile,
+              fileSize: data.fileSize || 0
+            };
+            if (!streamState.info.recordingHistory) {
+              streamState.info.recordingHistory = [];
+            }
+            streamState.info.recordingHistory.unshift(record);
+            // 只保留最近50条记录
+            if (streamState.info.recordingHistory.length > 50) {
+              streamState.info.recordingHistory = streamState.info.recordingHistory.slice(0, 50);
+            }
+            updateStream(streamState.info.roomId, { recordingHistory: streamState.info.recordingHistory });
+            logger.info(`Recording saved: ${data.outputFile}, size: ${data.fileSize}`);
+          }
+          streamState.currentRecordingStart = null;
         }
         this.notifyUpdate();
       },
@@ -372,6 +394,7 @@ class StreamManager {
 
     streamState.recorder = recorder;
     streamState.status = 'recording';
+    streamState.currentRecordingStart = Date.now();
     this.notifyUpdate();
 
     await recorder.startRecording();

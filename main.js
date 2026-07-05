@@ -145,6 +145,16 @@ function setupIPC() {
     }
   });
 
+  // 获取录制记录
+  ipcMain.handle('get-recording-history', async (event, roomId) => {
+    try {
+      const history = streamManager.getRecordingHistory(roomId);
+      return { success: true, history };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   // 开始录制
   ipcMain.handle('start-recording', async (event, roomId) => {
     try {
