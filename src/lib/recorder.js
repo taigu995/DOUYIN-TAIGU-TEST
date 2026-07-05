@@ -471,6 +471,163 @@ class Recorder {
   }
 
   /**
+   * 从抖音直播页面提取直播流URL
+   */
+  async extractStreamUrl() {
+    if (!this.captureWindow || this.captureWindow.isDestroyed()) return null;
+
+    try {
+      const result = await this.captureWindow.webContents.executeJavaScript(`
+        (async () => {
+          try {
+            // 方法1: 从 RENDER_DATA 中提取
+            const renderScript = document.getElementById('RENDER_DATA');
+            if (renderScript) {
+              const data = JSON.parse(decodeURIComponent(renderScript.textContent));
+              // 遍历查找 stream_url
+              const findStreamUrl = (obj) => {
+                if (!obj || typeof obj !== 'object') return null;
+                if (obj.stream_url && (obj.stream_url.flv_pull_url || obj.stream_url.hls_pull_url_map)) {
+                  return obj.stream_url;
+                }
+                for (const key of Object.keys(obj)) {
+                  const result = findStreamUrl(obj[key]);
+                  if (result) return result;
+                }
+                return null;
+              };
+              const streamUrl = findStreamUrl(data);
+              if (streamUrl) {
+                const flvUrl = streamUrl.flv_pull_url && Object.values(streamUrl.flv_pull_url)[0];
+                const hlsUrl = streamUrl.hls_pull_url_map && Object.values(streamUrl.hls_pull_url_map)[0];
+                return { url: flvUrl || hlsUrl, type: flvUrl ? 'flv' : 'hls', source: 'RENDER_DATA' };
+              }
+            }
+
+            // 方法2: 从 __NEXT_DATA__ 中提取
+            const nextDataScript = document.getElementById('__NEXT_DATA__');
+            if (nextDataScript) {
+              const data = JSON.parse(nextDataScript.textContent);
+              const findStreamUrl = (obj) => {
+                if (!obj || typeof obj !== 'object') return null;
+                if (obj.stream_url) return obj.stream_url;
+                for (const key of Object.keys(obj)) {
+                  const result = findStreamUrl(obj[key]);
+                  if (result) return result;
+                }
+                return null;
+              };
+              const streamUrl = findStreamUrl(data);
+              if (streamUrl) {
+                const flvUrl = streamUrl.flv_pull_url && Object.values(streamUrl.flv_pull_url)[0];
+                const hlsUrl = streamUrl.hls_pull_url_map && Object.values(streamUrl.hls_pull_url_map)[0];
+                return { url: flvUrl || hlsUrl, type: flvUrl ? 'flv' : 'hls', source: '__NEXT_DATA__' };
+              }
+            }
+
+            // 方法3: 从页面中的 video 元素获取 src
+            const videos = document.querySelectorAll('video');
+            for (const video of videos) {
+              const src = video.src || video.currentSrc;
+              if (src && (src.includes('.flv') || src.includes('live') || src.includes('.m3u8'))) {
+                return { url: src, type: src.includes('.m3u8') ? 'hls' : 'flv', source: 'video_element' };
+              }
+            }
+
+            return null;
+          } catch (e) {
+            return { error: e.message };
+          }
+        })()
+      `);
+
+      if (result && result.url) {
+        logger.info(`[Recorder] 提取到直播流URL (来源: ${result.source}, 类型: ${result.type})`);
+        return result;
+      } else if (result && result.error) {
+        logger.warn(`[Recorder] 提取直播流URL出错: ${result.error}`);
+      }
+      return null;
+    } catch (e) {
+      logger.warn(`[Recorder] 提取直播流URL失败: ${e.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * 开始直播流直接录制（含音频）
+   */
+  startStreamRecording(streamInfo) {
+    const resolvedPath = getFFmpegPath();
+    const { spawn } = require('child_process');
+
+    const streamUrl = streamInfo.url;
+    logger.info(`[Recorder] 使用直播流直接录制: ${streamUrl.substring(0, 80)}...`);
+
+    const args = [
+      '-rw_timeout', '10000000',
+      '-timeout', '10000000',
+      '-i', streamUrl,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      '-y',
+      this.outputFile
+    ];
+
+    logger.info(`[Recorder] 启动 FFmpeg 流录制: ${resolvedPath}`);
+    this.ffmpegProcess = spawn(resolvedPath, args, {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    this.ffmpegProcess.stdout.on('data', (data) => {
+      const msg = data.toString().trim();
+      if (msg) logger.info(`[FFmpeg-Stream] ${msg}`);
+    });
+
+    this.ffmpegProcess.stderr.on('data', (data) => {
+      const msg = data.toString().trim();
+      if (msg) logger.info(`[FFmpeg-Stream] ${msg}`);
+    });
+
+    this.ffmpegProcess.on('close', (code) => {
+      logger.info(`[FFmpeg-Stream] 进程退出, code: ${code}`);
+      this.ffmpegProcess = null;
+      // 如果是流录制模式，进程退出意味着录制结束
+      if (this.recording && this._isStreamMode) {
+        this.recording = false;
+        this.onStatusChange('stopped', {
+          roomId: this.roomId,
+          streamerName: this.streamerName,
+          outputFile: this.outputFile,
+          fileSize: this._getFileSize(),
+          duration: Date.now() - (this.startTime ? this.startTime.getTime() : Date.now()),
+          frameCount: 0
+        });
+      }
+    });
+
+    this.ffmpegProcess.on('error', (err) => {
+      logger.error(`[FFmpeg-Stream] 进程错误:`, err);
+      this.onError(this.roomId, err);
+    });
+
+    this.hasAudio = true;
+    this._isStreamMode = true;
+  }
+
+  /**
+   * 获取输出文件大小
+   */
+  _getFileSize() {
+    try {
+      if (this.outputFile && fs.existsSync(this.outputFile)) {
+        return fs.statSync(this.outputFile).size;
+      }
+    } catch (e) { /* ignore */ }
+    return 0;
+  }
+
+  /**
    * 开始录制
    */
   async startRecording() {
@@ -499,6 +656,7 @@ class Recorder {
       this.outputFile = path.join(streamerFolder, `${fileName}.${config.fileFormat || 'mp4'}`);
       this.startTime = new Date();
       this.frameCount = 0;
+      this._isStreamMode = false;
 
       logger.info(`[Recorder] 输出文件: ${this.outputFile}`);
 
@@ -509,13 +667,29 @@ class Recorder {
         logger.info('[Recorder] 捕获窗口创建成功');
       }
 
-      // 启动 FFmpeg 编码进程
-      logger.info(`[Recorder] 启动 FFmpeg 进程, FPS: ${config.fps || 30}`);
-      this.startFFmpegProcess(config.fps || 30);
+      // 等待页面加载
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // 开始捕获帧
+      // 尝试提取直播流URL
+      logger.info('[Recorder] 尝试提取直播流URL...');
+      const streamInfo = await this.extractStreamUrl();
+
+      if (streamInfo && streamInfo.url) {
+        // 使用直播流直接录制（含音频）
+        logger.info('[Recorder] 成功提取直播流URL，使用流直接录制模式（含音频）');
+        this.startStreamRecording(streamInfo);
+      } else {
+        // 回退到离屏渲染方案
+        logger.warn('[Recorder] 未能提取直播流URL，回退到离屏渲染录制模式（无音频）');
+        this.hasAudio = false;
+        logger.info(`[Recorder] 启动 FFmpeg 进程, FPS: ${config.fps || 30}`);
+        this.startFFmpegProcess(config.fps || 30);
+
+        // 开始捕获帧
+        this.startCapture();
+      }
+
       this.recording = true;
-      this.startCapture();
 
       logger.info(`[Recorder] 录制已开始: ${this.streamerName} -> ${this.outputFile}`);
 
@@ -523,7 +697,9 @@ class Recorder {
         roomId: this.roomId,
         streamerName: this.streamerName,
         outputFile: this.outputFile,
-        startTime: this.startTime
+        startTime: this.startTime,
+        hasAudio: this.hasAudio,
+        isStreamMode: this._isStreamMode
       });
     } catch (err) {
       logger.error(`[Recorder] 启动录制失败: ${err.message}`, err);
@@ -741,15 +917,53 @@ class Recorder {
     if (!this.recording) return;
 
     this.recording = false;
-    logger.info(`Stopping recording: ${this.streamerName}, total frames: ${this.frameCount}`);
+    logger.info(`Stopping recording: ${this.streamerName}, total frames: ${this.frameCount}, stream mode: ${this._isStreamMode}`);
 
-    // 停止捕获
+    // 停止帧捕获（离屏模式）
     if (this._captureInterval) {
       clearInterval(this._captureInterval);
       this._captureInterval = null;
     }
 
-    // 关闭 FFmpeg
+    // 流模式：直接发送 SIGINT 让 FFmpeg 优雅退出并正确写入文件头
+    if (this._isStreamMode && this.ffmpegProcess) {
+      return new Promise((resolve) => {
+        let resolved = false;
+        const done = () => {
+          if (resolved) return;
+          resolved = true;
+          
+          const fileSize = this._getFileSize();
+          
+          this.onStatusChange('stopped', {
+            roomId: this.roomId,
+            streamerName: this.streamerName,
+            outputFile: this.outputFile,
+            fileSize: fileSize,
+            duration: Date.now() - (this.startTime ? this.startTime.getTime() : Date.now()),
+            frameCount: 0
+          });
+          resolve();
+        };
+        
+        // 发送 SIGINT 让 FFmpeg 优雅退出（正确写入文件头）
+        try {
+          this.ffmpegProcess.kill('SIGINT');
+        } catch (e) { /* ignore */ }
+        
+        this.ffmpegProcess.on('close', done);
+
+        // 超时强制结束
+        setTimeout(() => {
+          if (this.ffmpegProcess) {
+            try { this.ffmpegProcess.kill('SIGKILL'); } catch (e) { /* ignore */ }
+          }
+          done();
+        }, 10000);
+      });
+    }
+
+    // 离屏模式：关闭 stdin 让 FFmpeg 完成编码
     if (this.ffmpegProcess && this.ffmpegProcess.stdin) {
       return new Promise((resolve) => {
         let resolved = false;
@@ -757,16 +971,7 @@ class Recorder {
           if (resolved) return;
           resolved = true;
           
-          // 获取文件大小
-          let fileSize = 0;
-          try {
-            if (this.outputFile && fs.existsSync(this.outputFile)) {
-              const stats = fs.statSync(this.outputFile);
-              fileSize = stats.size;
-            }
-          } catch (e) {
-            logger.warn('Failed to get file size:', e.message);
-          }
+          const fileSize = this._getFileSize();
           
           this.onStatusChange('stopped', {
             roomId: this.roomId,
