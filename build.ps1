@@ -185,19 +185,12 @@ if ($buildSuccess) {
     & npm config set electron_mirror https://npmmirror.com/mirrors/electron/ 2>&1 | Out-Null
     Write-Log "Mirror configured: npmmirror.com" "OK"
     
-    # Approve build scripts for packages that need postinstall (electron, ffmpeg, etc.)
-    # Required for pnpm v11+ which blocks build scripts by default
-    Write-Log "Ensuring .npmrc configuration for pnpm v11+..." "INFO"
-    $npmrcPath = Join-Path $ProjectDir ".npmrc"
-    # Always recreate .npmrc to ensure correct settings
-    $npmrcContent = "onlyBuiltDependencies[]=electron`nonlyBuiltDependencies[]=@ffmpeg-installer/ffmpeg`nonlyBuiltDependencies[]=electron-builder"
-    Set-Content -Path $npmrcPath -Value $npmrcContent -Encoding UTF8 -Force
-    Write-Log ".npmrc created at: $npmrcPath" "OK"
-    
-    Write-Log "Running pnpm install (first time may take several minutes)..." "STEP"
+    # Use npm install instead of pnpm to avoid pnpm v11 build script restrictions
+    # npm runs all postinstall scripts by default (required for electron binary download)
+    Write-Log "Running npm install (first time may take several minutes)..." "STEP"
     Write-Host ""
     
-    $installOutput = & pnpm install --config.confirmModulesPurge=false 2>&1
+    $installOutput = & npm install 2>&1
     $installExitCode = $LASTEXITCODE
     
     $installOutput | ForEach-Object {
@@ -230,7 +223,7 @@ if ($buildSuccess) {
     Write-Log "Running electron-builder (first build downloads Electron binary)..." "STEP"
     Write-Host ""
     
-    $buildOutput = & pnpm run build 2>&1
+    $buildOutput = & npm run build 2>&1
     $buildExitCode = $LASTEXITCODE
     
     $buildOutput | ForEach-Object {
