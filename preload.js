@@ -6,13 +6,16 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // 添加直播间
-  addStream: (inputText) => ipcRenderer.invoke('add-stream', inputText),
+  addStream: (inputText, customName) => ipcRenderer.invoke('add-stream', inputText, customName),
 
   // 删除直播间
   removeStream: (roomId) => ipcRenderer.invoke('remove-stream', roomId),
 
   // 切换自动录制开关
   toggleAutoRecord: (roomId) => ipcRenderer.invoke('toggle-auto-record', roomId),
+
+  // 修改直播间信息
+  updateStream: (roomId, updates) => ipcRenderer.invoke('update-stream', roomId, updates),
 
   // 获取录制记录
   getRecordingHistory: (roomId) => ipcRenderer.invoke('get-recording-history', roomId),

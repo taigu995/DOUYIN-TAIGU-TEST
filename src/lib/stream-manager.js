@@ -39,8 +39,8 @@ class StreamManager {
    * 添加直播间
    * @param {string} inputText - 用户输入（房间号、链接或分享文本）
    */
-  async addStreamByInput(inputText) {
-    logger.info(`Adding stream, input: "${inputText.substring(0, 50)}..."`);
+  async addStreamByInput(inputText, customName) {
+    logger.info(`Adding stream, input: "${inputText.substring(0, 50)}...", customName: "${customName || ''}"`);
     
     // 1. 智能解析输入
     const parsed = extractInput(inputText);
@@ -89,16 +89,19 @@ class StreamManager {
     // 4. 构建直播间URL
     const liveUrl = buildLiveUrl(roomId);
 
-    // 5. 创建监控窗口获取主播名称（如果文本中没有提取到）
-    if (!streamerName) {
+    // 5. 创建监控窗口获取主播名称（如果文本中没有提取到，也没有自定义名称）
+    if (!streamerName && !customName) {
       streamerName = await this.fetchStreamerName(roomId, liveUrl);
     }
 
-    // 6. 创建流信息
+    // 6. 构建最终主播名称：自定义名称优先
+    const finalName = customName || streamerName || `主播${roomId}`;
+
+    // 7. 创建流信息
     const streamInfo = {
       roomId,
       liveUrl,
-      streamerName: streamerName || `主播${roomId}`,
+      streamerName: finalName,
       originalUrl: parsed.type === 'roomId' ? liveUrl : parsed.value,
       addedAt: Date.now()
     };
@@ -731,6 +734,31 @@ class StreamManager {
     logger.info(`[StreamManager] 切换自动录制: ${roomId} -> ${state.info.autoRecord}`);
     this.notifyUpdate();
     return state.info.autoRecord;
+  }
+
+  /**
+   * 更新直播间信息（如主播名称）
+   */
+  updateStreamInfo(roomId, updates) {
+    const state = this.streams.get(roomId);
+    if (!state) {
+      throw new Error(`直播间 ${roomId} 不存在`);
+    }
+
+    // 合并更新
+    if (updates.streamerName) {
+      state.info.streamerName = updates.streamerName;
+    }
+    if (updates.autoRecord !== undefined) {
+      state.info.autoRecord = updates.autoRecord;
+    }
+
+    // 持久化到配置
+    updateStream(roomId, updates);
+
+    logger.info(`[StreamManager] 更新直播间信息: ${roomId}`, updates);
+    this.notifyUpdate();
+    return state.info;
   }
 
   /**

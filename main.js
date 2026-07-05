@@ -124,10 +124,20 @@ function createTray() {
  */
 function setupIPC() {
   // 添加直播间
-  ipcMain.handle('add-stream', async (event, inputText) => {
+  ipcMain.handle('add-stream', async (event, inputText, customName) => {
     try {
-      const result = await streamManager.addStreamByInput(inputText);
+      const result = await streamManager.addStreamByInput(inputText, customName);
       return { success: true, data: result };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // 修改直播间信息
+  ipcMain.handle('update-stream', async (event, roomId, updates) => {
+    try {
+      streamManager.updateStreamInfo(roomId, updates);
+      return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
     }

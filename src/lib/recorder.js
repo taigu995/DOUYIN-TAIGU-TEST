@@ -139,11 +139,12 @@ class Recorder {
     try {
       await this.captureWindow.webContents.executeJavaScript(`
         (function() {
-          // 尝试找到视频元素并播放
+          // 尝试找到视频元素并播放（不静音，以捕获音频）
           const videos = document.querySelectorAll('video');
           for (const video of videos) {
+            video.muted = false;
+            video.volume = 1.0; // 最大音量
             if (video.paused) {
-              video.muted = true; // 静音以允许自动播放
               video.play().catch(() => {});
             }
           }
@@ -155,7 +156,7 @@ class Recorder {
           }
         })();
       `);
-      logger.info('[Recorder] 已尝试启动视频播放');
+      logger.info('[Recorder] 已尝试启动视频播放（最大音量）');
     } catch (e) {
       logger.warn('[Recorder] 启动视频播放失败:', e.message);
     }
@@ -553,45 +554,100 @@ class Recorder {
   startFFmpegProcess(fps) {
     // Electron 的 capturePage().getBitmap() 在 Windows 上返回 BGRA 格式
     // 需要指定正确的输入像素格式
-    const args = [
-      '-f', 'rawvideo',
-      '-pix_fmt', 'bgra',      // BGRA 格式 (Windows 上 Electron 返回的格式)
-      '-s', '1920x1080',
-      '-r', String(fps),
-      '-i', 'pipe:0',
-      '-c:v', 'libx264',
-      '-preset', 'medium',     // 使用 medium 预设，画质与速度平衡更好
-      '-crf', '15',            // CRF 15，接近无损画质
-      '-pix_fmt', 'yuv420p',
-      '-movflags', '+faststart',
-      '-y',
-      this.outputFile
-    ];
-
     const resolvedPath = getFFmpegPath();
     const { spawn } = require('child_process');
-    logger.info(`[Recorder] 启动 FFmpeg: ${resolvedPath}, 输入格式: bgra`);
-    this.ffmpegProcess = spawn(resolvedPath, args, {
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
 
-    this.ffmpegProcess.stdout.on('data', (data) => {
-      console.log(`[FFmpeg] ${data.toString().trim()}`);
-    });
+    // 先尝试检测可用的音频设备
+    this._detectAudioDevice().then(audioDevice => {
+      const args = [
+        // 视频输入（从管道读取原始帧）
+        '-f', 'rawvideo',
+        '-pix_fmt', 'bgra',
+        '-s', '1920x1080',
+        '-r', String(fps),
+        '-i', 'pipe:0',
+      ];
 
-    this.ffmpegProcess.stderr.on('data', (data) => {
-      const msg = data.toString().trim();
-      if (msg) console.log(`[FFmpeg] ${msg}`);
-    });
+      // 如果检测到音频设备，添加音频输入
+      if (audioDevice) {
+        args.push('-f', 'dshow', '-i', `audio=${audioDevice}`);
+        args.push('-c:a', 'aac', '-b:a', '192k');
+        logger.info(`[Recorder] 音频设备: ${audioDevice}`);
+      } else {
+        logger.warn('[Recorder] 未检测到音频设备，仅录制视频（无声音）');
+      }
 
-    this.ffmpegProcess.on('close', (code) => {
-      console.log(`[FFmpeg] 进程退出, code: ${code}`);
-      this.ffmpegProcess = null;
-    });
+      args.push(
+        '-c:v', 'libx264',
+        '-preset', 'medium',
+        '-crf', '15',
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+        '-y',
+        this.outputFile
+      );
 
-    this.ffmpegProcess.on('error', (err) => {
-      console.error(`[FFmpeg] 进程错误:`, err);
-      this.onError(this.roomId, err);
+      logger.info(`[Recorder] 启动 FFmpeg: ${resolvedPath}, 输入格式: bgra`);
+      this.ffmpegProcess = spawn(resolvedPath, args, {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      this.ffmpegProcess.stdout.on('data', (data) => {
+        console.log(`[FFmpeg] ${data.toString().trim()}`);
+      });
+
+      this.ffmpegProcess.stderr.on('data', (data) => {
+        const msg = data.toString().trim();
+        if (msg) console.log(`[FFmpeg] ${msg}`);
+      });
+
+      this.ffmpegProcess.on('close', (code) => {
+        console.log(`[FFmpeg] 进程退出, code: ${code}`);
+        this.ffmpegProcess = null;
+      });
+
+      this.ffmpegProcess.on('error', (err) => {
+        console.error(`[FFmpeg] 进程错误:`, err);
+        this.onError(this.roomId, err);
+      });
+    });
+  }
+
+  /**
+   * 检测可用的音频捕获设备
+   */
+  _detectAudioDevice() {
+    return new Promise((resolve) => {
+      const resolvedPath = getFFmpegPath();
+      const { execSync } = require('child_process');
+      try {
+        const output = execSync(`"${resolvedPath}" -f dshow -list_devices true -i dummy 2>&1`, {
+          timeout: 5000,
+          encoding: 'utf-8'
+        });
+        // 解析输出，找到第一个音频设备
+        const lines = output.split('\n');
+        let inAudioSection = false;
+        let audioDevice = null;
+        for (const line of lines) {
+          if (line.includes('DirectShow audio devices')) {
+            inAudioSection = true;
+            continue;
+          }
+          if (inAudioSection) {
+            // 匹配形如 "Stereo Mix (Realtek Audio)" 的设备名
+            const match = line.match(/"([^"]+)"/);
+            if (match) {
+              audioDevice = match[1];
+              break;
+            }
+          }
+        }
+        resolve(audioDevice);
+      } catch (e) {
+        logger.warn('[Recorder] 检测音频设备失败:', e.message);
+        resolve(null);
+      }
     });
   }
 

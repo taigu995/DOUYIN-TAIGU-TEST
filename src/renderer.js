@@ -43,7 +43,8 @@ const elements = {
   btnOpenLogFile: document.getElementById('btn-open-log-file'),
   btnExportLogs: document.getElementById('btn-export-logs'),
   btnClearLogs: document.getElementById('btn-clear-logs'),
-  logSizeInfo: document.getElementById('log-size-info')
+  logSizeInfo: document.getElementById('log-size-info'),
+  inputStreamerName: document.getElementById('input-streamer-name')
 };
 
 // 当前直播间数据
@@ -245,6 +246,7 @@ async function handleAddStream() {
   const roomId = elements.inputRoomId.value.trim();
   const profileUrl = elements.inputProfileUrl.value.trim();
   const liveUrl = elements.inputLiveUrl.value.trim();
+  const customName = elements.inputStreamerName.value.trim();
 
   // 确定使用哪个输入
   let inputText = '';
@@ -272,13 +274,14 @@ async function handleAddStream() {
 
   try {
     if (isElectron) {
-      const result = await window.electronAPI.addStream(inputText);
+      const result = await window.electronAPI.addStream(inputText, customName);
       if (result.success) {
         showToast(`已添加直播间: ${result.data.streamerName}`, 'success');
-        // 清空对应输入框
-        if (inputType === 'roomId') elements.inputRoomId.value = '';
-        else if (inputType === 'profileUrl') elements.inputProfileUrl.value = '';
-        else if (inputType === 'liveUrl') elements.inputLiveUrl.value = '';
+        // 清空输入框
+        elements.inputRoomId.value = '';
+        elements.inputProfileUrl.value = '';
+        elements.inputLiveUrl.value = '';
+        elements.inputStreamerName.value = '';
         // 刷新列表
         const status = await window.electronAPI.getAllStatus();
         streamsData = status || [];
@@ -503,7 +506,15 @@ function createStreamCard(stream) {
       <div class="stream-info">
         <div class="stream-avatar ${isLive ? 'live' : ''}">${initial}</div>
         <div class="stream-meta">
-          <div class="stream-name" title="${stream.streamerName || '未知主播'}">${stream.streamerName || '未知主播'}</div>
+          <div class="stream-name">
+            <span title="${stream.streamerName || '未知主播'}">${stream.streamerName || '未知主播'}</span>
+            <button class="btn-edit-name" onclick="handleEditStreamerName('${stream.roomId}')" title="修改主播名称">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+            </button>
+          </div>
           <div class="stream-room-id">房间号: ${stream.roomId}</div>
         </div>
       </div>
@@ -632,6 +643,40 @@ window.handleToggleAutoRecord = async function (roomId) {
       renderStreamsList(streamsData);
     }
     showToast('切换出错: ' + err.message, 'error');
+  }
+};
+
+// 修改主播名称
+window.handleEditStreamerName = async function (roomId) {
+  const stream = streamsData.find(s => s.roomId === roomId);
+  const currentName = stream?.streamerName || '';
+  
+  const newName = prompt('请输入主播名称:', currentName);
+  if (newName === null || newName.trim() === '') return;
+  if (newName.trim() === currentName) return;
+
+  if (isElectron) {
+    try {
+      const result = await window.electronAPI.updateStream(roomId, { streamerName: newName.trim() });
+      if (result.success) {
+        showToast(`主播名称已更新为: ${newName.trim()}`, 'success');
+        // 刷新列表
+        const status = await window.electronAPI.getAllStatus();
+        streamsData = status || [];
+        renderStreamsList(streamsData);
+      } else {
+        showToast('修改失败: ' + result.error, 'error');
+      }
+    } catch (err) {
+      showToast('修改失败: ' + err.message, 'error');
+    }
+  } else {
+    // Demo 模式
+    if (stream) {
+      stream.streamerName = newName.trim();
+      renderStreamsList(streamsData);
+      showToast(`主播名称已更新为: ${newName.trim()}`, 'success');
+    }
   }
 };
 

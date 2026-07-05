@@ -165,7 +165,7 @@ function generateFileName(streamerName) {
   const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
   // 清理文件名中的非法字符
   const safeName = (streamerName || '未知主播').replace(/[<>:"/\\|?*]/g, '_');
-  return `${safeName}_${timestamp}`;
+  return `[${safeName}][${timestamp}]`;
 }
 
 module.exports = {
