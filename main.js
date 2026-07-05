@@ -135,6 +135,16 @@ function setupIPC() {
     }
   });
 
+  // 切换自动录制开关
+  ipcMain.handle('toggle-auto-record', async (event, roomId) => {
+    try {
+      const autoRecord = streamManager.toggleAutoRecord(roomId);
+      return { success: true, autoRecord };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   // 开始录制
   ipcMain.handle('start-recording', async (event, roomId) => {
     try {

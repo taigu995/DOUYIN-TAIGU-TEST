@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 删除直播间
   removeStream: (roomId) => ipcRenderer.invoke('remove-stream', roomId),
 
+  // 切换自动录制开关
+  toggleAutoRecord: (roomId) => ipcRenderer.invoke('toggle-auto-record', roomId),
+
   // 开始录制
   startRecording: (roomId) => ipcRenderer.invoke('start-recording', roomId),
 

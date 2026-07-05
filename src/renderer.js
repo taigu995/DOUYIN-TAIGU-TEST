@@ -366,6 +366,12 @@ function createStreamCard(stream) {
         </div>
       </div>
       <div class="stream-actions">
+        <button class="btn-icon btn-toggle-record ${stream.autoRecord !== false ? 'active' : ''}" onclick="handleToggleAutoRecord('${stream.roomId}')" title="${stream.autoRecord !== false ? '关闭自动录制' : '开启自动录制'}">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/>
+          </svg>
+        </button>
         ${isRecording
           ? `<button class="btn btn-danger btn-sm" onclick="handleStopRecording('${stream.roomId}')">停止录制</button>`
           : `<button class="btn btn-success btn-sm" onclick="handleStartRecording('${stream.roomId}')" ${!isLive ? 'disabled title="未开播"' : ''}>开始录制</button>`
@@ -436,6 +442,21 @@ window.handleRemoveStream = async function (roomId) {
     }
   } catch (err) {
     showToast('删除出错: ' + err.message, 'error');
+  }
+};
+
+window.handleToggleAutoRecord = async function (roomId) {
+  if (!isElectron) return;
+  try {
+    const result = await window.electronAPI.toggleAutoRecord(roomId);
+    if (result.success) {
+      showToast(result.autoRecord ? '已开启自动录制' : '已关闭自动录制', 'success');
+      const status = await window.electronAPI.getAllStatus();
+      streamsData = status || [];
+      renderStreamsList(streamsData);
+    }
+  } catch (err) {
+    showToast('切换出错: ' + err.message, 'error');
   }
 };
 

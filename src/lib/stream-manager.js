@@ -420,6 +420,29 @@ class StreamManager {
   }
 
   /**
+   * 切换自动录制开关
+   */
+  toggleAutoRecord(roomId) {
+    const state = this.streams.get(roomId);
+    if (!state) return null;
+
+    const current = state.info.autoRecord !== false; // 默认为 true
+    state.info.autoRecord = !current;
+
+    // 更新配置
+    const streams = config.get('streams');
+    const idx = streams.findIndex(s => s.roomId === roomId);
+    if (idx >= 0) {
+      streams[idx].autoRecord = state.info.autoRecord;
+      config.set('streams', streams);
+    }
+
+    logger.info(`[StreamManager] 切换自动录制: ${roomId} -> ${state.info.autoRecord}`);
+    this.notifyUpdate();
+    return state.info.autoRecord;
+  }
+
+  /**
    * 获取所有直播间状态
    */
   getAllStatus() {
@@ -432,6 +455,7 @@ class StreamManager {
         status: state.status,
         isLive: state.isLive,
         lastCheck: state.lastCheck,
+        autoRecord: state.info.autoRecord !== false, // 默认为 true
         recorder: state.recorder ? state.recorder.getStatus() : null
       });
     }

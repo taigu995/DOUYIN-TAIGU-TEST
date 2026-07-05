@@ -473,6 +473,40 @@ body {
   flex-shrink: 0;
 }
 
+/* 自动录制开关 */
+.auto-record-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-light);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.auto-record-toggle:hover {
+  border-color: var(--primary);
+  color: var(--text-secondary);
+}
+
+.auto-record-toggle.active {
+  background: rgba(220, 38, 38, 0.15);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.auto-record-toggle .toggle-icon {
+  font-size: 12px;
+}
+
+.auto-record-toggle .toggle-text {
+  white-space: nowrap;
+}
+
 .stream-card-body {
   display: flex;
   align-items: center;
