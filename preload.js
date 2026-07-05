@@ -38,6 +38,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 打开登录窗口
   openLogin: () => ipcRenderer.invoke('open-login'),
 
+  // 清除登录数据
+  clearLogin: () => ipcRenderer.invoke('clear-login'),
+
   // 获取登录状态
   getLoginStatus: () => ipcRenderer.invoke('get-login-status'),
 

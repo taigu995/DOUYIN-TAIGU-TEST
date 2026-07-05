@@ -115,14 +115,15 @@ class Recorder {
     // 注入 CSS 防止页面滚动，确保捕获区域固定
     await this.injectNoScrollCSS();
 
-    // 尝试设置最高画质
-    await this.setMaxQuality();
+    // 等待 CSS 生效
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     return this.captureWindow;
   }
 
   /**
    * 注入 CSS 防止页面滚动，确保捕获区域固定
+   * 强制隐藏所有非视频元素，只保留视频画面
    */
   async injectNoScrollCSS() {
     if (!this.captureWindow || this.captureWindow.isDestroyed()) return;
@@ -130,34 +131,94 @@ class Recorder {
     try {
       await this.captureWindow.webContents.executeJavaScript(`
         (function() {
-          // 注入 CSS 防止滚动
+          // 移除所有现有样式
+          document.querySelectorAll('style[data-recorder]').forEach(s => s.remove());
+          
           const style = document.createElement('style');
+          style.setAttribute('data-recorder', 'true');
           style.textContent = \`
+            /* 强制 html/body 固定大小 */
             html, body {
               overflow: hidden !important;
               width: 100vw !important;
               height: 100vh !important;
               margin: 0 !important;
               padding: 0 !important;
+              position: fixed !important;
+              top: 0 !important;
+              left: 0 !important;
+              scroll-behavior: auto !important;
             }
+            
+            /* 隐藏所有非视频元素 */
+            body > *:not(video):not([class*="player"]):not([class*="video"]):not([id*="player"]):not([id*="video"]) {
+              display: none !important;
+              visibility: hidden !important;
+              opacity: 0 !important;
+              pointer-events: none !important;
+            }
+            
+            /* 隐藏弹幕、礼物、聊天等覆盖层 */
+            [class*="danmu"], [class*="chat"], [class*="gift"], [class*="comment"],
+            [class*="message"], [class*="barrage"], [class*="reward"], [class*="panel"],
+            [class*="sidebar"], [class*="aside"], [class*="header"], [class*="footer"],
+            [class*="nav"], [class*="menu"], [class*="toolbar"], [class*="control"],
+            [class*="overlay"]:not([class*="player"]), [class*="popup"], [class*="modal"],
+            [class*="dialog"], [class*="toast"], [class*="notice"] {
+              display: none !important;
+            }
+            
+            /* 视频元素填满整个视口 */
+            video {
+              position: fixed !important;
+              top: 0 !important;
+              left: 0 !important;
+              width: 100vw !important;
+              height: 100vh !important;
+              object-fit: cover !important;
+              z-index: 999999 !important;
+              transform: none !important;
+              animation: none !important;
+            }
+            
             /* 隐藏滚动条 */
             ::-webkit-scrollbar { display: none !important; }
-            /* 确保视频容器填满 */
-            video {
-              object-fit: contain !important;
-              width: 100% !important;
-              height: 100% !important;
+            * { scrollbar-width: none !important; }
+            
+            /* 禁用所有动画和过渡 */
+            * {
+              animation: none !important;
+              transition: none !important;
             }
           \`;
           document.head.appendChild(style);
           
-          // 滚动到顶部
+          // 强制滚动到顶部
           window.scrollTo(0, 0);
+          document.documentElement.scrollTop = 0;
+          document.body.scrollTop = 0;
           
-          // 禁用滚动事件
-          window.addEventListener('scroll', function(e) {
+          // 持续阻止滚动
+          const preventScroll = (e) => {
+            e.preventDefault();
             window.scrollTo(0, 0);
-          }, { passive: true });
+            return false;
+          };
+          
+          // 移除旧监听器
+          window._recorderScrollHandler && window.removeEventListener('scroll', window._recorderScrollHandler);
+          window._recorderScrollHandler = preventScroll;
+          window.addEventListener('scroll', preventScroll, { passive: false, capture: true });
+          window.addEventListener('wheel', preventScroll, { passive: false, capture: true });
+          window.addEventListener('touchmove', preventScroll, { passive: false, capture: true });
+          
+          // 定时重置滚动位置
+          if (window._recorderScrollInterval) clearInterval(window._recorderScrollInterval);
+          window._recorderScrollInterval = setInterval(() => {
+            if (window.scrollY !== 0 || document.documentElement.scrollTop !== 0) {
+              window.scrollTo(0, 0);
+            }
+          }, 100);
         })();
       `);
       logger.info('[Recorder] 已注入防滚动 CSS');

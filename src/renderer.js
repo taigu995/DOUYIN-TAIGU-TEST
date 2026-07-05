@@ -33,6 +33,8 @@ const elements = {
   autoStart: document.getElementById('auto-start'),
   minimizeToTray: document.getElementById('minimize-to-tray'),
   launchAtLogin: document.getElementById('launch-at-login'),
+  btnClearLogin: document.getElementById('btn-clear-login'),
+  btnRelogin: document.getElementById('btn-relogin'),
   toastContainer: document.getElementById('toast-container'),
   btnLogs: document.getElementById('btn-logs'),
   logPanel: document.getElementById('log-panel'),
@@ -162,6 +164,39 @@ function bindEvents() {
       }
     }
   });
+
+  // 清除登录数据
+  if (elements.btnClearLogin) {
+    elements.btnClearLogin.addEventListener('click', async () => {
+      if (!isElectron) {
+        showToast('此功能仅在桌面应用中可用', 'warning');
+        return;
+      }
+      if (!confirm('确定要清除登录数据吗？清除后需要重新登录抖音账号。')) {
+        return;
+      }
+      const result = await window.electronAPI.clearLogin();
+      if (result.success) {
+        showToast(result.message || '登录数据已清除', 'success');
+        // 刷新登录状态
+        setTimeout(loadLoginStatus, 500);
+      } else {
+        showToast('清除失败: ' + (result.error || '未知错误'), 'error');
+      }
+    });
+  }
+
+  // 重新登录
+  if (elements.btnRelogin) {
+    elements.btnRelogin.addEventListener('click', async () => {
+      if (!isElectron) {
+        showToast('此功能仅在桌面应用中可用', 'warning');
+        return;
+      }
+      await window.electronAPI.openLogin();
+      showToast('已打开登录窗口，请重新登录抖音', 'info');
+    });
+  }
 
   // 日志查看器事件
   elements.btnLogs.addEventListener('click', showLogPanel);

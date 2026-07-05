@@ -43,6 +43,7 @@ function createMainWindow() {
     title: '抖音直播录制工具',
     resizable: true,
     autoHideMenuBar: true,
+    skipTaskbar: false,  // 确保在任务栏显示
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -52,6 +53,11 @@ function createMainWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+
+  // 最小化时保持在任务栏显示
+  mainWindow.on('minimize', () => {
+    mainWindow.setSkipTaskbar(false);
+  });
 
   // 关闭时最小化到托盘
   mainWindow.on('close', (e) => {
@@ -377,6 +383,25 @@ function setupIPC() {
     });
 
     return { success: true };
+  });
+
+  // 清除登录数据
+  ipcMain.handle('clear-login', async () => {
+    try {
+      const { session } = require('electron');
+      const ses = session.fromPartition('persist:douyin');
+      
+      // 清除所有 cookies
+      await ses.clearStorageData({
+        storages: ['cookies', 'localstorage', 'sessionstorage', 'indexeddb', 'websql', 'cachestorage']
+      });
+      
+      logger.info('已清除登录数据');
+      return { success: true, message: '登录数据已清除，请重新登录' };
+    } catch (e) {
+      logger.error('清除登录数据失败:', e);
+      return { success: false, error: e.message };
+    }
   });
 
   // 在浏览器中打开直播间（用于调试）
