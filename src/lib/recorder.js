@@ -329,45 +329,107 @@ class Recorder {
   async setMaxQuality() {
     if (!this.captureWindow || this.captureWindow.isDestroyed()) return;
 
-    try {
-      await this.captureWindow.webContents.executeJavaScript(`
-        (function() {
-          // 抖音直播画质选择：尝试多种方式切换到最高画质
-          
-          // 方法1: 通过画质按钮和菜单
-          const qualitySelectors = [
-            '[class*="quality"]', '[class*="definition"]',
-            '[class*="Quality"]', '[class*="Definition"]',
-            '[data-e2e="quality"]', '[class*="clarity"]',
-            '[class*="resolution"]'
-          ];
-          
-          for (const selector of qualitySelectors) {
-            const btns = document.querySelectorAll(selector);
-            if (btns.length > 0) {
-              btns[0].click();
-              break;
-            }
-          }
-          
-          // 等待菜单弹出后选择最高画质
-          setTimeout(() => {
-            const optionSelectors = [
-              '[class*="quality-item"]', '[class*="definition-item"]',
-              '[class*="QualityItem"]', '[class*="option"]',
-              'li[class*="item"]', '[data-quality]'
-            ];
+    // 多次重试，确保页面完全加载后能设置画质
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        const result = await this.captureWindow.webContents.executeJavaScript(`
+          (function() {
+            // ===== 方法1: 查找画质/清晰度按钮（通过文本内容匹配） =====
+            const allElements = document.querySelectorAll('span, div, button, a, p');
+            let qualityBtn = null;
+            const btnKeywords = ['画质', '清晰度', '蓝光', '原画', '超清', '1080P', '1080p', '720P'];
             
-            for (const selector of optionSelectors) {
-              const options = document.querySelectorAll(selector);
-              if (options.length > 0) {
-                // 通常第一个或最后一个选项是最高画质
-                // 尝试找到包含"蓝光"、"原画"、"超清"、"1080p"等关键词的选项
+            for (const el of allElements) {
+              const text = (el.textContent || '').trim();
+              // 匹配短文本（按钮文字通常很短）
+              if (text.length <= 10 && text.length >= 2) {
+                for (const kw of btnKeywords) {
+                  if (text.includes(kw)) {
+                    qualityBtn = el;
+                    break;
+                  }
+                }
+              }
+              if (qualityBtn) break;
+            }
+            
+            // 方法1b: 通过 class 属性匹配
+            if (!qualityBtn) {
+              const classSelectors = [
+                '[class*="quality"]', '[class*="Quality"]',
+                '[class*="definition"]', '[class*="Definition"]',
+                '[class*="clarity"]', '[class*="Clarity"]',
+                '[data-e2e="quality"]', '[class*="resolution"]',
+                '[class*="xgplayer-quality"]', '[class*="xg-player-quality"]'
+              ];
+              for (const sel of classSelectors) {
+                const els = document.querySelectorAll(sel);
+                if (els.length > 0) {
+                  qualityBtn = els[0];
+                  break;
+                }
+              }
+            }
+            
+            if (!qualityBtn) {
+              return { success: false, reason: '未找到画质按钮, attempt=' + ${attempt} };
+            }
+            
+            // 点击画质按钮打开菜单
+            qualityBtn.click();
+            
+            // 等待菜单弹出后选择最高画质
+            return new Promise((resolve) => {
+              setTimeout(() => {
+                // 查找画质选项列表
+                const optionSelectors = [
+                  '[class*="quality-item"]', '[class*="QualityItem"]',
+                  '[class*="quality_item"]', '[class*="definition-item"]',
+                  '[class*="DefinitionItem"]', '[class*="definition_item"]',
+                  '[class*="quality-option"]', '[class*="QualityOption"]',
+                  '[class*="xgplayer-quality"] li',
+                  '[class*="menu-item"]', '[class*="MenuItem"]',
+                  'li[class*="item"]', '[class*="option"]',
+                  '[data-quality]', '[data-definition]'
+                ];
+                
+                let options = [];
+                for (const sel of optionSelectors) {
+                  const found = document.querySelectorAll(sel);
+                  if (found.length >= 2) {
+                    options = found;
+                    break;
+                  }
+                }
+                
+                // 如果通过选择器找不到，尝试查找所有包含画质关键词的 li/div/span
+                if (options.length === 0) {
+                  const allItems = document.querySelectorAll('li, div[class*="item"], span[class*="item"]');
+                  const qualityItems = [];
+                  const qualityKws = ['蓝光', '原画', '超清', '高清', '标清', '1080', '720', '480', '4K', 'HDR', '流畅'];
+                  for (const item of allItems) {
+                    const t = (item.textContent || '').trim();
+                    if (t.length <= 20 && qualityKws.some(kw => t.includes(kw))) {
+                      qualityItems.push(item);
+                    }
+                  }
+                  if (qualityItems.length >= 2) {
+                    options = qualityItems;
+                  }
+                }
+                
+                if (options.length === 0) {
+                  resolve({ success: false, reason: '未找到画质选项列表' });
+                  return;
+                }
+                
+                // 按优先级选择最高画质
+                const priorityKeywords = ['蓝光', '原画', '4K', 'HDR', '1080P', '1080p', '1080', '超清', '720P', '720p', '720'];
                 let bestOption = null;
-                const keywords = ['蓝光', '原画', '超清', '1080', '4K', 'HDR', '最高'];
-                for (const opt of options) {
-                  const text = (opt.textContent || '').trim();
-                  for (const kw of keywords) {
+                
+                for (const kw of priorityKeywords) {
+                  for (const opt of options) {
+                    const text = (opt.textContent || '').trim();
                     if (text.includes(kw)) {
                       bestOption = opt;
                       break;
@@ -375,36 +437,35 @@ class Recorder {
                   }
                   if (bestOption) break;
                 }
+                
                 // 如果没找到关键词匹配的，选第一个（通常是最高画质）
                 if (!bestOption) bestOption = options[0];
+                
+                const selectedText = (bestOption.textContent || '').trim();
                 bestOption.click();
-                break;
-              }
-            }
-          }, 800);
-          
-          // 方法2: 尝试通过播放器设置面板
-          setTimeout(() => {
-            const settingsBtns = document.querySelectorAll(
-              '[class*="setting"], [class*="Setting"], ' +
-              '[aria-label*="设置"], [title*="设置"], ' +
-              '[class*="gear"], [class*="config"]'
-            );
-            for (const btn of settingsBtns) {
-              const rect = btn.getBoundingClientRect();
-              // 只点击视频播放器区域内的设置按钮
-              if (rect.top < window.innerHeight * 0.7) {
-                btn.click();
-                break;
-              }
-            }
-          }, 1500);
-        })();
-      `);
-      logger.info('[Recorder] 已尝试设置最高画质');
-    } catch (e) {
-      logger.warn('[Recorder] 设置画质时出错:', e.message);
+                resolve({ success: true, quality: selectedText });
+              }, 1000);
+            });
+          })();
+        `);
+        
+        if (result && result.success) {
+          logger.info(`[Recorder] 已设置最高画质: ${result.quality}`);
+          return;
+        } else {
+          logger.warn(`[Recorder] 设置画质未成功 (尝试 ${attempt}/5): ${result ? result.reason : 'unknown'}`);
+        }
+      } catch (e) {
+        logger.warn(`[Recorder] 设置画质时出错 (尝试 ${attempt}/5): ${e.message}`);
+      }
+      
+      // 等待后重试
+      if (attempt < 5) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
     }
+    
+    logger.warn('[Recorder] 5次尝试后仍未成功设置画质');
   }
 
   /**
