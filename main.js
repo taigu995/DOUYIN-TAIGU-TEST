@@ -333,7 +333,8 @@ function setupIPC() {
             webPreferences: {
               partition: 'persist:douyin',
               contextIsolation: true,
-              nodeIntegration: false
+              nodeIntegration: false,
+              additionalArguments: ['--mute-audio']
             }
           });
           

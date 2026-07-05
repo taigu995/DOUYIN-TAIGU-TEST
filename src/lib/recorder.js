@@ -97,8 +97,8 @@ class Recorder {
         contextIsolation: true,
         partition: this.session || 'persist:douyin', // 共享登录态
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-        // 自动播放视频
-        additionalArguments: ['--autoplay-policy=no-user-gesture-required']
+        // 自动播放视频但静音，防止音频从扬声器输出
+        additionalArguments: ['--autoplay-policy=no-user-gesture-required', '--mute-audio']
       }
     });
 
