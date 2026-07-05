@@ -115,6 +115,12 @@ class Recorder {
     // 尝试启动视频播放
     await this.tryStartVideoPlayback();
 
+    // 设置最高画质
+    await this.setMaxQuality();
+
+    // 关闭弹幕显示
+    await this.hideDanmaku();
+
     // 注入 CSS 防止页面滚动，确保捕获区域固定
     await this.injectNoScrollCSS();
 
@@ -147,20 +153,77 @@ class Recorder {
           for (const btn of playBtns) {
             btn.click();
           }
-          
-          // 尝试点击弹幕开关（关闭弹幕以获得更清晰的画面）
-          // 注意：如果需要录制弹幕，不要关闭
-          // const danmuBtns = document.querySelectorAll('[class*="danmu"], [class*="barrage"]');
-          // for (const btn of danmuBtns) {
-          //   if (btn.checked || btn.classList.contains('active')) {
-          //     btn.click();
-          //   }
-          // }
         })();
       `);
       logger.info('[Recorder] 已尝试启动视频播放');
     } catch (e) {
       logger.warn('[Recorder] 启动视频播放失败:', e.message);
+    }
+  }
+
+  /**
+   * 关闭直播画面区域的弹幕
+   */
+  async hideDanmaku() {
+    if (!this.captureWindow || this.captureWindow.isDestroyed()) return;
+
+    try {
+      await this.captureWindow.webContents.executeJavaScript(`
+        (function() {
+          // 方法1: 尝试点击弹幕开关按钮（关闭弹幕）
+          const toggleBtns = document.querySelectorAll(
+            '[class*="danmu-toggle"], [class*="barrage-toggle"], ' +
+            '[class*="danmaku-switch"], [class*="dm-toggle"], ' +
+            '[data-e2e="danmaku-switch"], [class*="DanmakuSwitch"]'
+          );
+          for (const btn of toggleBtns) {
+            // 如果弹幕开关是开启状态，点击关闭
+            if (btn.checked || btn.classList.contains('active') || btn.classList.contains('on')) {
+              btn.click();
+            }
+          }
+
+          // 方法2: 直接隐藏弹幕相关元素
+          const danmakuSelectors = [
+            '[class*="danmu"]', '[class*="barrage"]',
+            '[class*="Danmu"]', '[class*="Barrage"]',
+            '[class*="danmaku"]', '[class*="Danmaku"]',
+            'canvas[class*="dm"]', '[class*="dm-container"]'
+          ];
+          for (const selector of danmakuSelectors) {
+            document.querySelectorAll(selector).forEach(el => {
+              // 只隐藏视频画面区域内的弹幕，不影响其他功能
+              const rect = el.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                el.style.display = 'none';
+                el.style.visibility = 'hidden';
+              }
+            });
+          }
+
+          // 方法3: 通过 MutationObserver 持续移除动态创建的弹幕元素
+          if (window._danmakuObserver) {
+            window._danmakuObserver.disconnect();
+          }
+          window._danmakuObserver = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+              for (const node of mutation.addedNodes) {
+                if (node.nodeType === 1) {
+                  const cls = (node.className || '').toString().toLowerCase();
+                  if (cls.includes('danmu') || cls.includes('barrage') || cls.includes('danmaku')) {
+                    node.style.display = 'none';
+                    node.style.visibility = 'hidden';
+                  }
+                }
+              }
+            }
+          });
+          window._danmakuObserver.observe(document.body, { childList: true, subtree: true });
+        })();
+      `);
+      logger.info('[Recorder] 已关闭弹幕显示');
+    } catch (e) {
+      logger.warn('[Recorder] 关闭弹幕失败:', e.message);
     }
   }
 
@@ -200,6 +263,23 @@ class Recorder {
             /* 隐藏滚动条 */
             ::-webkit-scrollbar { display: none !important; }
             * { scrollbar-width: none !important; }
+            /* 关闭直播画面区域的弹幕滚动 */
+            [class*="danmu"], [class*="barrage"], [class*="Danmu"], [class*="Barrage"] {
+              display: none !important;
+              visibility: hidden !important;
+              opacity: 0 !important;
+              pointer-events: none !important;
+            }
+            canvas[class*="danmu"], canvas[class*="barrage"] {
+              display: none !important;
+            }
+            /* 隐藏抖音直播弹幕容器 */
+            .webcast-chatroom___inner,
+            [class*="chat-room"], [class*="chatRoom"],
+            [class*="danmaku"], [class*="DanmakuContainer"],
+            [data-e2e="danmaku"], [data-e2e="barrage"] {
+              display: none !important;
+            }
           \`;
           document.head.appendChild(style);
           
@@ -250,26 +330,80 @@ class Recorder {
     if (!this.captureWindow || this.captureWindow.isDestroyed()) return;
 
     try {
-      // 尝试点击画质选择按钮切换到最高画质
       await this.captureWindow.webContents.executeJavaScript(`
         (function() {
-          // 尝试找到并点击画质设置
-          const qualityBtns = document.querySelectorAll('[class*="quality"], [class*="definition"]');
-          if (qualityBtns.length > 0) {
-            qualityBtns[0].click();
-          }
-          // 尝试选择最高画质选项
-          setTimeout(() => {
-            const options = document.querySelectorAll('[class*="quality-item"], [class*="definition-item"]');
-            if (options.length > 0) {
-              // 通常第一个是最高画质
-              options[0].click();
+          // 抖音直播画质选择：尝试多种方式切换到最高画质
+          
+          // 方法1: 通过画质按钮和菜单
+          const qualitySelectors = [
+            '[class*="quality"]', '[class*="definition"]',
+            '[class*="Quality"]', '[class*="Definition"]',
+            '[data-e2e="quality"]', '[class*="clarity"]',
+            '[class*="resolution"]'
+          ];
+          
+          for (const selector of qualitySelectors) {
+            const btns = document.querySelectorAll(selector);
+            if (btns.length > 0) {
+              btns[0].click();
+              break;
             }
-          }, 500);
+          }
+          
+          // 等待菜单弹出后选择最高画质
+          setTimeout(() => {
+            const optionSelectors = [
+              '[class*="quality-item"]', '[class*="definition-item"]',
+              '[class*="QualityItem"]', '[class*="option"]',
+              'li[class*="item"]', '[data-quality]'
+            ];
+            
+            for (const selector of optionSelectors) {
+              const options = document.querySelectorAll(selector);
+              if (options.length > 0) {
+                // 通常第一个或最后一个选项是最高画质
+                // 尝试找到包含"蓝光"、"原画"、"超清"、"1080p"等关键词的选项
+                let bestOption = null;
+                const keywords = ['蓝光', '原画', '超清', '1080', '4K', 'HDR', '最高'];
+                for (const opt of options) {
+                  const text = (opt.textContent || '').trim();
+                  for (const kw of keywords) {
+                    if (text.includes(kw)) {
+                      bestOption = opt;
+                      break;
+                    }
+                  }
+                  if (bestOption) break;
+                }
+                // 如果没找到关键词匹配的，选第一个（通常是最高画质）
+                if (!bestOption) bestOption = options[0];
+                bestOption.click();
+                break;
+              }
+            }
+          }, 800);
+          
+          // 方法2: 尝试通过播放器设置面板
+          setTimeout(() => {
+            const settingsBtns = document.querySelectorAll(
+              '[class*="setting"], [class*="Setting"], ' +
+              '[aria-label*="设置"], [title*="设置"], ' +
+              '[class*="gear"], [class*="config"]'
+            );
+            for (const btn of settingsBtns) {
+              const rect = btn.getBoundingClientRect();
+              // 只点击视频播放器区域内的设置按钮
+              if (rect.top < window.innerHeight * 0.7) {
+                btn.click();
+                break;
+              }
+            }
+          }, 1500);
         })();
       `);
+      logger.info('[Recorder] 已尝试设置最高画质');
     } catch (e) {
-      console.log('[Recorder] 设置画质时出错:', e.message);
+      logger.warn('[Recorder] 设置画质时出错:', e.message);
     }
   }
 
@@ -365,8 +499,8 @@ class Recorder {
       '-r', String(fps),
       '-i', 'pipe:0',
       '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-crf', '18',
+      '-preset', 'medium',     // 使用 medium 预设，画质与速度平衡更好
+      '-crf', '15',            // CRF 15，接近无损画质
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
       '-y',
