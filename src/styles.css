@@ -94,6 +94,84 @@ body {
   display: flex;
   gap: 8px;
   -webkit-app-region: no-drag;
+  align-items: center;
+}
+
+/* ========== 登录状态 ========== */
+.login-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-right: 4px;
+}
+
+.login-status:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.login-status__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 2px solid var(--border);
+  transition: border-color 0.2s;
+}
+
+.login-status--online .login-status__avatar {
+  border-color: var(--success);
+}
+
+.login-status__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.login-status__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.login-status__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.login-status__badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  display: inline-block;
+  width: fit-content;
+}
+
+.login-status__badge--online {
+  background: rgba(82, 196, 26, 0.15);
+  color: var(--success);
+}
+
+.login-status__badge--offline {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+}
 }
 
 /* ========== 按钮 ========== */

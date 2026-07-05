@@ -4,7 +4,7 @@
  */
 const { BrowserWindow } = require('electron');
 const { Recorder } = require('./recorder');
-const { extractUrl, extractNameFromText, resolveShortUrl, buildLiveUrl } = require('./douyin-utils');
+const { extractUrl, extractInput, extractNameFromText, resolveShortUrl, buildLiveUrl } = require('./douyin-utils');
 const { getConfig, addStream, removeStream, updateStream, getStreams } = require('./config');
 
 class StreamManager {
@@ -32,32 +32,41 @@ class StreamManager {
 
   /**
    * 添加直播间
-   * @param {string} inputText - 用户粘贴的文本（可能包含分享文案）
+   * @param {string} inputText - 用户输入（房间号、链接或分享文本）
    */
   async addStreamByInput(inputText) {
-    // 1. 提取URL
-    const url = extractUrl(inputText);
-    if (!url) {
-      throw new Error('未能识别有效的抖音直播间链接');
+    // 1. 智能解析输入
+    const parsed = extractInput(inputText);
+    if (!parsed) {
+      throw new Error('未能识别有效的抖音直播间信息\n支持：房间号(如123456)、分享链接、分享文本');
     }
 
     // 2. 尝试从文本中提取主播名称
     let streamerName = extractNameFromText(inputText);
 
-    // 3. 解析链接获取 roomId
+    // 3. 根据输入类型获取 roomId
     let roomId, realUrl;
-    if (url.includes('v.douyin.com')) {
-      const resolved = await resolveShortUrl(url);
-      roomId = resolved.roomId;
-      realUrl = resolved.realUrl;
-    } else if (url.includes('live.douyin.com')) {
-      const match = url.match(/live\.douyin\.com\/(\d+)/);
-      roomId = match ? match[1] : null;
-      realUrl = url;
+
+    if (parsed.type === 'roomId') {
+      // 直接输入的房间号
+      roomId = parsed.value;
+      realUrl = buildLiveUrl(roomId);
+    } else {
+      // URL 类型，需要解析
+      const url = parsed.value;
+      if (url.includes('v.douyin.com')) {
+        const resolved = await resolveShortUrl(url);
+        roomId = resolved.roomId;
+        realUrl = resolved.realUrl;
+      } else if (url.includes('live.douyin.com')) {
+        const match = url.match(/live\.douyin\.com\/(\d+)/);
+        roomId = match ? match[1] : null;
+        realUrl = url;
+      }
     }
 
     if (!roomId) {
-      throw new Error('无法解析直播间ID，请检查链接是否正确');
+      throw new Error('无法解析直播间ID，请检查输入是否正确');
     }
 
     // 检查是否已添加
@@ -78,7 +87,7 @@ class StreamManager {
       roomId,
       liveUrl,
       streamerName: streamerName || `主播${roomId}`,
-      originalUrl: url,
+      originalUrl: parsed.type === 'roomId' ? liveUrl : parsed.value,
       addedAt: Date.now()
     };
 

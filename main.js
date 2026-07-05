@@ -177,6 +177,137 @@ function setupIPC() {
     return { canceled: false, path: result.filePaths[0] };
   });
 
+  // 获取登录状态和用户信息
+  ipcMain.handle('get-login-status', async () => {
+    try {
+      const douyinSession = session.fromPartition('persist:douyin');
+      const cookies = await douyinSession.cookies.get({ domain: '.douyin.com' });
+      
+      // 检查是否有登录相关的cookie
+      const hasLoginCookie = cookies.some(c => 
+        c.name === 'sessionid' || c.name === 'sessionid_ss' || c.name === 'login_status'
+      );
+      
+      if (!hasLoginCookie) {
+        return { loggedIn: false, name: '未登录', avatar: null };
+      }
+
+      // 尝试从抖音获取用户信息
+      const userInfoWindow = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          partition: 'persist:douyin',
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+        }
+      });
+
+      return new Promise((resolve) => {
+        userInfoWindow.loadURL('https://www.douyin.com', {
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+        });
+
+        userInfoWindow.webContents.on('did-finish-load', async () => {
+          try {
+            // 尝试多种方式获取用户名
+            const userInfo = await userInfoWindow.webContents.executeJavaScript(`
+              (function() {
+                // 方式1: 从页面头部获取用户名
+                const nameEl = document.querySelector('[data-e2e="user-info"] .user-name') ||
+                               document.querySelector('.avatar-wrapper .user-name') ||
+                               document.querySelector('header [class*="name"]') ||
+                               document.querySelector('[class*="UserName"]') ||
+                               document.querySelector('[class*="nickname"]');
+                
+                // 方式2: 从页面标题获取
+                const title = document.title || '';
+                
+                // 方式3: 从meta标签获取
+                const metaName = document.querySelector('meta[property="og:title"]');
+                
+                return {
+                  name: nameEl ? nameEl.textContent.trim() : (metaName ? metaName.content : ''),
+                  title: title
+                };
+              })()
+            `);
+
+            userInfoWindow.close();
+
+            let name = userInfo.name || '';
+            
+            // 如果从DOM没获取到，尝试从cookie中解析
+            if (!name) {
+              const nameCookie = cookies.find(c => c.name === 'passport_fe_name');
+              if (nameCookie) {
+                name = decodeURIComponent(nameCookie.value);
+              }
+            }
+
+            // 如果还是没获取到，使用默认名称
+            if (!name) {
+              name = '抖音用户';
+            }
+
+            // 获取头像
+            let avatar = null;
+            try {
+              const avatarResult = await new Promise((res) => {
+                const avatarWin = new BrowserWindow({
+                  show: false,
+                  webPreferences: {
+                    nodeIntegration: false,
+                    contextIsolation: true,
+                    partition: 'persist:douyin',
+                    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+                  }
+                });
+                avatarWin.loadURL('https://www.douyin.com', {
+                  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+                });
+                avatarWin.webContents.on('did-finish-load', async () => {
+                  try {
+                    const avatarUrl = await avatarWin.webContents.executeJavaScript(`
+                      (function() {
+                        const img = document.querySelector('[class*="avatar"] img') ||
+                                    document.querySelector('[data-e2e="user-avatar"] img') ||
+                                    document.querySelector('header img[class*="avatar"]');
+                        return img ? img.src : null;
+                      })()
+                    `);
+                    avatarWin.close();
+                    res({ avatar: avatarUrl });
+                  } catch (e) {
+                    avatarWin.close();
+                    res({ avatar: null });
+                  }
+                });
+                setTimeout(() => { avatarWin.close(); res({ avatar: null }); }, 5000);
+              });
+              avatar = avatarResult.avatar;
+            } catch (e) {
+              // ignore
+            }
+
+            resolve({ loggedIn: true, name, avatar });
+          } catch (e) {
+            userInfoWindow.close();
+            resolve({ loggedIn: true, name: '抖音用户', avatar: null });
+          }
+        });
+
+        // 超时处理
+        setTimeout(() => {
+          if (!userInfoWindow.isDestroyed()) userInfoWindow.close();
+          resolve({ loggedIn: true, name: '抖音用户', avatar: null });
+        }, 10000);
+      });
+    } catch (e) {
+      return { loggedIn: false, name: '未登录', avatar: null };
+    }
+  });
+
   // 打开登录窗口（用于首次登录抖音）
   ipcMain.handle('open-login', async () => {
     const loginWindow = new BrowserWindow({
@@ -197,10 +328,10 @@ function setupIPC() {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
     });
 
-    // 监听URL变化，登录成功后关闭
-    loginWindow.webContents.on('did-navigate', (event, url) => {
-      if (url.includes('douyin.com') && !url.includes('login')) {
-        // 可能已登录
+    // 监听登录窗口关闭，通知主界面刷新登录状态
+    loginWindow.on('closed', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('login-status-changed');
       }
     });
 

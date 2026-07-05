@@ -16,6 +16,9 @@ const elements = {
   streamCount: document.getElementById('stream-count'),
   statusText: document.getElementById('status-text'),
   recordingCount: document.getElementById('recording-count'),
+  loginStatus: document.getElementById('login-status'),
+  loginStatusName: document.getElementById('login-status__name'),
+  loginStatusBadge: document.getElementById('login-status__badge'),
   btnLogin: document.getElementById('btn-login'),
   btnSettings: document.getElementById('btn-settings'),
   settingsPanel: document.getElementById('settings-panel'),
@@ -33,6 +36,37 @@ const elements = {
 
 // 当前直播间数据
 let streamsData = [];
+
+// ========== 登录状态 ==========
+async function updateLoginStatus() {
+  if (!isElectron) return;
+
+  try {
+    const status = await window.electronAPI.getLoginStatus();
+    
+    if (status.loggedIn) {
+      elements.loginStatusName.textContent = status.name || '抖音用户';
+      elements.loginStatusBadge.textContent = '已登录';
+      elements.loginStatusBadge.className = 'login-status__badge login-status__badge--online';
+      elements.loginStatus.className = 'login-status login-status--online';
+      elements.btnLogin.style.display = 'none';
+      
+      // 如果有头像，替换图标
+      if (status.avatar) {
+        const avatarEl = elements.loginStatus.querySelector('.login-status__avatar');
+        avatarEl.innerHTML = `<img src="${status.avatar}" alt="avatar" onerror="this.parentElement.innerHTML='<svg width=\\'16\\' height=\\'16\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'2\\'><path d=\\'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2\\'></path><circle cx=\\'12\\' cy=\\'7\\' r=\\'4\\'></circle></svg>'">`;
+      }
+    } else {
+      elements.loginStatusName.textContent = '未登录';
+      elements.loginStatusBadge.textContent = '未登录';
+      elements.loginStatusBadge.className = 'login-status__badge login-status__badge--offline';
+      elements.loginStatus.className = 'login-status';
+      elements.btnLogin.style.display = '';
+    }
+  } catch (e) {
+    // ignore
+  }
+}
 
 // ========== 初始化 ==========
 async function init() {
@@ -57,10 +91,19 @@ async function init() {
       renderStreamsList(data);
     });
 
+    // 监听登录状态变化
+    window.electronAPI.onLoginStatusChanged(() => {
+      updateLoginStatus();
+      showToast('登录状态已更新', 'success');
+    });
+
     // 初始加载
     const status = await window.electronAPI.getAllStatus();
     streamsData = status || [];
     renderStreamsList(streamsData);
+
+    // 检查登录状态
+    updateLoginStatus();
   } else {
     // 非 Electron 环境（浏览器预览），显示模拟数据
     renderDemoMode();

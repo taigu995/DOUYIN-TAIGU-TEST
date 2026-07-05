@@ -5,17 +5,27 @@
 const { net } = require('electron');
 
 /**
- * 从用户粘贴的分享文本中提取抖音链接
+ * 从用户输入中提取抖音链接或房间号
  * 支持格式：
- * - https://v.douyin.com/xxxxx/
- * - https://live.douyin.com/XXXXXXX
- * - https://www.douyin.com/user/xxxxx
- * 以及包含链接的分享文本
+ * - 纯房间号：123456789
+ * - 短链接：https://v.douyin.com/xxxxx/
+ * - 直播链接：https://live.douyin.com/XXXXXXX
+ * - 用户主页：https://www.douyin.com/user/xxxxx
+ * - 以及包含链接的分享文本
+ * 
+ * 返回 { type: 'roomId'|'url', value: string }
  */
-function extractUrl(text) {
-  if (!text || typeof text !== 'string') return null;
+function extractInput(input) {
+  if (!input || typeof input !== 'string') return null;
 
-  // 匹配所有可能的抖音链接
+  const trimmed = input.trim();
+
+  // 1. 纯数字 → 房间号
+  if (/^\d{5,15}$/.test(trimmed)) {
+    return { type: 'roomId', value: trimmed };
+  }
+
+  // 2. 从文本中提取URL
   const urlPatterns = [
     /https?:\/\/v\.douyin\.com\/[A-Za-z0-9]+\/?/g,
     /https?:\/\/live\.douyin\.com\/\d+/g,
@@ -23,12 +33,31 @@ function extractUrl(text) {
   ];
 
   for (const pattern of urlPatterns) {
-    const matches = text.match(pattern);
+    const matches = trimmed.match(pattern);
     if (matches && matches.length > 0) {
-      return matches[0];
+      return { type: 'url', value: matches[0] };
     }
   }
+
+  // 3. 检查是否包含 live.douyin.com 的纯数字ID（如输入 "live.douyin.com/123456"）
+  const liveMatch = trimmed.match(/live\.douyin\.com\/(\d+)/);
+  if (liveMatch) {
+    return { type: 'roomId', value: liveMatch[1] };
+  }
+
   return null;
+}
+
+/**
+ * 兼容旧接口：从分享文本中提取URL
+ */
+function extractUrl(text) {
+  const result = extractInput(text);
+  if (!result) return null;
+  if (result.type === 'roomId') {
+    return `https://live.douyin.com/${result.value}`;
+  }
+  return result.value;
 }
 
 /**
@@ -131,6 +160,7 @@ function generateFileName(streamerName) {
 
 module.exports = {
   extractUrl,
+  extractInput,
   extractNameFromText,
   resolveShortUrl,
   buildLiveUrl,

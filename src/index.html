@@ -20,6 +20,18 @@
         <h1>抖音直播录制工具</h1>
       </div>
       <div class="header-right">
+        <div id="login-status" class="login-status" title="点击登录抖音">
+          <div class="login-status__avatar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+          </div>
+          <div class="login-status__info">
+            <span id="login-status__name" class="login-status__name">未登录</span>
+            <span id="login-status__badge" class="login-status__badge login-status__badge--offline">未登录</span>
+          </div>
+        </div>
         <button id="btn-login" class="btn btn-ghost" title="登录抖音账号">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -42,7 +54,7 @@
         <textarea
           id="input-url"
           class="input-url"
-          placeholder="粘贴抖音直播间链接或分享文本，例如：&#10;https://v.douyin.com/xxxxx/&#10;或分享文本：#在抖音，记录美好生活#【主播名】正在直播... https://v.douyin.com/xxxxx/"
+          placeholder="输入房间号、直播链接或分享文本，例如：&#10;房间号：123456&#10;链接：https://v.douyin.com/xxxxx/&#10;分享文本：#在抖音，记录美好生活#【主播名】正在直播... https://v.douyin.com/xxxxx/"
           rows="3"
         ></textarea>
         <button id="btn-add" class="btn btn-primary">

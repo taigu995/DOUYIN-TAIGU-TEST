@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 打开登录窗口
   openLogin: () => ipcRenderer.invoke('open-login'),
 
+  // 获取登录状态
+  getLoginStatus: () => ipcRenderer.invoke('get-login-status'),
+
   // 在浏览器中打开
   openInBrowser: (url) => ipcRenderer.invoke('open-in-browser', url),
 
@@ -42,6 +45,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onStreamsUpdated: (callback) => {
     ipcRenderer.on('streams-updated', (event, data) => {
       callback(data);
+    });
+  },
+
+  // 监听登录状态变化
+  onLoginStatusChanged: (callback) => {
+    ipcRenderer.on('login-status-changed', () => {
+      callback();
     });
   }
 });
