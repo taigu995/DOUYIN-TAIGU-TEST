@@ -319,7 +319,7 @@ if ($buildSuccess) {
     
     # Open dist directory
     if (Test-Path $distDir) {
-        Start-Explorer $distDir
+        Invoke-Item $distDir
     }
 } else {
     Write-Host "  ============================================================" -ForegroundColor Red
