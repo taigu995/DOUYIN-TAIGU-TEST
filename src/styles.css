@@ -532,6 +532,14 @@ body {
   accent-color: var(--accent);
 }
 
+.setting-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  margin-left: 24px;
+  line-height: 1.4;
+}
+
 .settings-actions {
   margin-top: 24px;
   display: flex;

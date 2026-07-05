@@ -155,6 +155,15 @@ function setupIPC() {
   // 设置配置
   ipcMain.handle('set-config', async (event, key, value) => {
     setConfig(key, value);
+
+    // 如果修改了开机自启动设置，同步应用到系统
+    if (key === 'launchAtLogin') {
+      app.setLoginItemSettings({
+        openAtLogin: value === true,
+        path: app.getPath('exe')
+      });
+    }
+
     return { success: true };
   });
 
@@ -232,6 +241,13 @@ app.whenReady().then(async () => {
   createMainWindow();
   createTray();
   setupIPC();
+
+  // 应用开机自启动设置
+  const config = getConfig();
+  app.setLoginItemSettings({
+    openAtLogin: config.launchAtLogin === true,
+    path: app.getPath('exe')
+  });
 
   // 恢复已保存的直播间
   await streamManager.restoreStreams();

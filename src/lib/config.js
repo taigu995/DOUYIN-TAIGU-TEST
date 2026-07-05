@@ -11,6 +11,7 @@ const defaults = {
   fps: 30,                // 录制帧率
   fileFormat: 'mp4',      // 输出格式
   autoStart: true,        // 检测到开播自动开始录制
+  launchAtLogin: false,   // 开机自启动
   minimizeToTray: true,   // 关闭时最小化到托盘
   streams: []             // 已添加的直播间列表
 };
@@ -33,6 +34,7 @@ function getConfig() {
     fps: s.get('fps'),
     fileFormat: s.get('fileFormat'),
     autoStart: s.get('autoStart'),
+    launchAtLogin: s.get('launchAtLogin'),
     minimizeToTray: s.get('minimizeToTray'),
     streams: s.get('streams')
   };

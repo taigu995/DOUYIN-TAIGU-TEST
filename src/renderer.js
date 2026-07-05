@@ -27,6 +27,7 @@ const elements = {
   fps: document.getElementById('fps'),
   autoStart: document.getElementById('auto-start'),
   minimizeToTray: document.getElementById('minimize-to-tray'),
+  launchAtLogin: document.getElementById('launch-at-login'),
   toastContainer: document.getElementById('toast-container')
 };
 
@@ -43,6 +44,7 @@ async function init() {
     elements.fps.value = config.fps || 30;
     elements.autoStart.checked = config.autoStart !== false;
     elements.minimizeToTray.checked = config.minimizeToTray !== false;
+    elements.launchAtLogin.checked = config.launchAtLogin === true;
 
     if (!config.outputFolder) {
       const defaultFolder = await window.electronAPI.getDefaultFolder();
@@ -151,6 +153,7 @@ async function handleSaveSettings() {
     await window.electronAPI.setConfig('fps', parseInt(elements.fps.value) || 30);
     await window.electronAPI.setConfig('autoStart', elements.autoStart.checked);
     await window.electronAPI.setConfig('minimizeToTray', elements.minimizeToTray.checked);
+    await window.electronAPI.setConfig('launchAtLogin', elements.launchAtLogin.checked);
     showToast('设置已保存', 'success');
   }
   elements.settingsPanel.style.display = 'none';
