@@ -205,6 +205,27 @@ function bindEvents() {
   elements.btnOpenLogFile.addEventListener('click', openLogFolder);
   elements.btnExportLogs.addEventListener('click', exportLogs);
   elements.btnClearLogs.addEventListener('click', clearLogs);
+
+  // 功能介绍按钮
+  const btnAbout = document.getElementById('btn-about');
+  if (btnAbout) {
+    btnAbout.addEventListener('click', () => {
+      document.getElementById('about-modal').style.display = 'flex';
+    });
+  }
+
+  // GitHub 链接 - 使用系统浏览器打开
+  const githubLink = document.getElementById('about-github-link');
+  if (githubLink) {
+    githubLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (isElectron) {
+        window.electronAPI.openInBrowser('https://github.com/taigu995/DOUYIN-TAIGU-TEST');
+      } else {
+        window.open('https://github.com/taigu995/DOUYIN-TAIGU-TEST', '_blank');
+      }
+    });
+  }
 }
 
 // ========== 添加直播间 ==========
