@@ -557,7 +557,7 @@ function showHistoryModal(data) {
 
   const modal = document.createElement('div');
   modal.id = 'history-modal';
-  modal.className = 'modal-overlay';
+  modal.className = 'history-modal';
   modal.innerHTML = `
     <div class="modal-content history-modal-content">
       <div class="modal-header">
