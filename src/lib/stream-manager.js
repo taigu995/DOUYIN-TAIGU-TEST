@@ -129,44 +129,72 @@ class StreamManager {
   }
 
   /**
-   * 通过API获取主播名称
+   * 通过API获取主播名称（携带session cookies）
    */
   async fetchStreamerNameFromAPI(roomId) {
     return new Promise((resolve) => {
-      const url = `https://live.douyin.com/webcast/room/web/enter/?aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=130.0.0.0&web_rid=${roomId}`;
+      const { session } = require('electron');
+      const douyinSession = session.fromPartition('persist:douyin');
       
-      const options = {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-          'Accept': 'application/json, text/plain, */*',
-          'Referer': `https://live.douyin.com/${roomId}`,
-        }
-      };
+      // 获取cookies用于API请求
+      douyinSession.cookies.get({ domain: '.douyin.com' }).then(cookies => {
+        const cookieStr = cookies
+          .filter(c => c.value && c.name)
+          .map(c => `${c.name}=${c.value}`)
+          .join('; ');
+        
+        const url = `https://live.douyin.com/webcast/room/web/enter/?aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=130.0.0.0&web_rid=${roomId}`;
+        
+        const options = {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': `https://live.douyin.com/${roomId}`,
+            'Cookie': cookieStr || ''
+          }
+        };
 
-      https.get(url, options, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          try {
-            const json = JSON.parse(data);
-            // 尝试从多个可能的路径获取主播名称
-            const roomInfo = json?.data?.data?.[0];
-            const owner = roomInfo?.owner;
-            const name = owner?.nickname || owner?.name || roomInfo?.nickname;
-            if (name) {
-              logger.info(`[API] 获取主播名称成功: ${name}`);
-              resolve(name);
-            } else {
-              logger.warn(`[API] 未找到主播名称，响应: ${data.substring(0, 200)}`);
+        https.get(url, options, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            try {
+              const json = JSON.parse(data);
+              // 尝试从多个可能的路径获取主播名称
+              const roomInfo = json?.data?.data?.[0];
+              const owner = roomInfo?.owner;
+              const name = owner?.nickname || owner?.name || roomInfo?.nickname;
+              if (name) {
+                logger.info(`[API] 获取主播名称成功: ${name}`);
+                resolve(name);
+              } else {
+                // 尝试其他路径
+                const altName = json?.data?.user?.nickname || json?.data?.owner?.nickname;
+                if (altName) {
+                  logger.info(`[API] 获取主播名称成功(alt): ${altName}`);
+                  resolve(altName);
+                } else {
+                  logger.warn(`[API] 未找到主播名称，响应: ${data.substring(0, 300)}`);
+                  resolve(null);
+                }
+              }
+            } catch (e) {
+              logger.warn(`[API] 解析响应失败: ${e.message}, 原始数据: ${data.substring(0, 200)}`);
               resolve(null);
             }
-          } catch (e) {
-            logger.warn(`[API] 解析响应失败: ${e.message}`);
-            resolve(null);
-          }
+          });
+        }).on('error', (e) => {
+          logger.warn(`[API] 请求失败: ${e.message}`);
+          resolve(null);
         });
-      }).on('error', (e) => {
-        logger.warn(`[API] 请求失败: ${e.message}`);
+        
+        // 超时10秒
+        setTimeout(() => {
+          logger.warn(`[API] 请求超时`);
+          resolve(null);
+        }, 10000);
+      }).catch(e => {
+        logger.warn(`[API] 获取cookies失败: ${e.message}`);
         resolve(null);
       });
     });
@@ -611,8 +639,49 @@ class StreamManager {
     const streamState = this.streams.get(roomId);
     if (!streamState || !streamState.recorder) return;
 
-    await streamState.recorder.stopRecording();
-    streamState.recorder.destroy();
+    const recorder = streamState.recorder;
+    const outputFile = recorder.outputFile;
+    const startTime = streamState.currentRecordingStart || recorder.startTime;
+    
+    await recorder.stopRecording();
+    
+    // 确保录制记录被保存（即使 onStatusChange 回调未触发）
+    if (startTime && outputFile) {
+      if (!streamState.info.recordingHistory) {
+        streamState.info.recordingHistory = [];
+      }
+      // 检查是否已经保存过（避免重复）
+      const alreadySaved = streamState.info.recordingHistory.some(
+        r => r.outputFile === outputFile
+      );
+      if (!alreadySaved) {
+        let fileSize = 0;
+        try {
+          const fs = require('fs');
+          if (fs.existsSync(outputFile)) {
+            fileSize = fs.statSync(outputFile).size;
+          }
+        } catch (e) { /* ignore */ }
+        
+        const record = {
+          startTime: typeof startTime === 'string' ? new Date(startTime).getTime() : (startTime instanceof Date ? startTime.getTime() : startTime),
+          endTime: Date.now(),
+          outputFile: outputFile,
+          fileSize: fileSize,
+          streamerName: streamState.info.streamerName
+        };
+        streamState.info.recordingHistory.unshift(record);
+        if (streamState.info.recordingHistory.length > 50) {
+          streamState.info.recordingHistory = streamState.info.recordingHistory.slice(0, 50);
+        }
+        updateStream(streamState.info.roomId, { recordingHistory: streamState.info.recordingHistory });
+        logger.info(`[StreamManager] 录制记录已保存: ${outputFile}, 大小: ${fileSize} bytes`);
+      }
+    }
+    
+    streamState.currentRecordingStart = null;
+    
+    try { recorder.destroy(); } catch (e) { /* ignore */ }
     streamState.recorder = null;
     streamState.status = streamState.isLive ? 'live' : 'offline';
     this.notifyUpdate();
@@ -657,12 +726,7 @@ class StreamManager {
     state.info.autoRecord = !current;
 
     // 更新配置
-    const streams = config.get('streams');
-    const idx = streams.findIndex(s => s.roomId === roomId);
-    if (idx >= 0) {
-      streams[idx].autoRecord = state.info.autoRecord;
-      config.set('streams', streams);
-    }
+    updateStream(roomId, { autoRecord: state.info.autoRecord });
 
     logger.info(`[StreamManager] 切换自动录制: ${roomId} -> ${state.info.autoRecord}`);
     this.notifyUpdate();

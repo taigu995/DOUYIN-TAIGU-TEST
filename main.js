@@ -155,8 +155,8 @@ function setupIPC() {
   // 获取录制记录
   ipcMain.handle('get-recording-history', async (event, roomId) => {
     try {
-      const history = streamManager.getRecordingHistory(roomId);
-      return { success: true, history };
+      const historyData = streamManager.getRecordingHistory(roomId);
+      return { success: true, ...historyData };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -232,49 +232,89 @@ function setupIPC() {
         return { loggedIn: false, name: '未登录', avatar: null };
       }
 
-      // 优先从cookie中获取用户名
       let name = '';
       
-      // 尝试从多种cookie中获取用户名（按优先级排序）
-      const nameCookies = [
-        'passport_fe_name',      // 前端用户名
-        'login_name',            // 登录名
-        'uid_tt_name',           // 用户名
-        'passport_uid_name',     // 用户ID名
-        'ttwid',                 // 设备ID（可能包含用户信息）
-      ];
-      
-      for (const cookieName of nameCookies) {
-        const cookie = cookies.find(c => c.name === cookieName && c.value);
-        if (cookie) {
-          try {
-            const decoded = decodeURIComponent(cookie.value);
-            // 尝试解析JSON格式
-            if (decoded.startsWith('{') || decoded.startsWith('[')) {
-              const parsed = JSON.parse(decoded);
-              if (parsed.name) {
-                name = parsed.name;
-                break;
-              } else if (parsed.nickname) {
-                name = parsed.nickname;
-                break;
-              } else if (parsed.screen_name) {
-                name = parsed.screen_name;
+      // 方法1: 使用抖音用户信息API获取真实用户名
+      try {
+        const cookieStr = cookies
+          .filter(c => c.value && c.name)
+          .map(c => `${c.name}=${c.value}`)
+          .join('; ');
+        
+        const apiResult = await new Promise((resolve) => {
+          const https = require('https');
+          const url = 'https://www.douyin.com/passport/web/account/info/';
+          const options = {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+              'Cookie': cookieStr,
+              'Accept': 'application/json',
+              'Referer': 'https://www.douyin.com/'
+            }
+          };
+          
+          https.get(url, options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+              try {
+                const json = JSON.parse(data);
+                if (json && json.data) {
+                  resolve({
+                    name: json.data.nickname || json.data.screen_name || json.data.name || '',
+                    avatar: json.data.avatar_url || ''
+                  });
+                } else {
+                  resolve(null);
+                }
+              } catch (e) {
+                resolve(null);
+              }
+            });
+          }).on('error', () => resolve(null));
+          
+          // 超时5秒
+          setTimeout(() => resolve(null), 5000);
+        });
+        
+        if (apiResult && apiResult.name) {
+          name = apiResult.name;
+          logger.info(`登录状态: 从API获取用户名成功: ${name}`);
+        }
+      } catch (e) {
+        logger.warn(`API获取用户名失败: ${e.message}`);
+      }
+
+      // 方法2: 如果API失败，尝试从cookie中获取
+      if (!name) {
+        const nameCookies = [
+          'passport_fe_name',
+          'login_name', 
+          'uid_tt_name',
+          'passport_uid_name',
+        ];
+        
+        for (const cookieName of nameCookies) {
+          const cookie = cookies.find(c => c.name === cookieName && c.value);
+          if (cookie) {
+            try {
+              const decoded = decodeURIComponent(cookie.value);
+              if (decoded.startsWith('{') || decoded.startsWith('[')) {
+                const parsed = JSON.parse(decoded);
+                name = parsed.name || parsed.nickname || parsed.screen_name || '';
+                if (name) break;
+              } else if (decoded && decoded !== 'null' && decoded !== 'undefined' && decoded.length < 50 && !/^[0-9]+$/.test(decoded)) {
+                name = decoded;
                 break;
               }
-            } else if (decoded && decoded !== 'null' && decoded !== 'undefined' && decoded.length < 50 && !/^[0-9]+$/.test(decoded)) {
-              // 排除纯数字的cookie值
-              name = decoded;
-              break;
-            }
-          } catch (e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
+          }
         }
       }
 
-      // 如果cookie中没有用户名，尝试从session中获取用户信息
+      // 方法3: 如果还是没获取到，创建临时窗口从DOM获取
       if (!name) {
         try {
-          // 创建一个临时窗口来获取用户信息
           const tempWindow = new BrowserWindow({
             show: false,
             width: 800,
@@ -286,57 +326,52 @@ function setupIPC() {
             }
           });
           
-          // 加载抖音首页
           await tempWindow.loadURL('https://www.douyin.com');
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(resolve => setTimeout(resolve, 5000));
           
-          // 从页面中提取用户名
-          const userInfo = await tempWindow.webContents.executeJavaScript(`
-            (function() {
-              // 尝试多种选择器获取用户名
-              const selectors = [
-                // 头部用户信息
-                '[data-e2e="user-info"] [class*="name"]',
-                '[data-e2e="user-info"] span',
-                '.avatar-wrapper [class*="name"]',
-                'header [class*="user-name"]',
-                'header [class*="UserName"]',
-                // 通用用户信息
-                '[class*="nickname"]',
-                '[class*="NickName"]',
-                '[class*="user-name"]',
-                '[class*="username"]',
-                // 个人主页链接中的用户名
-                'a[href*="/user/"] [class*="name"]'
-              ];
-              
-              for (const sel of selectors) {
-                const el = document.querySelector(sel);
-                if (el && el.textContent && el.textContent.trim()) {
-                  const text = el.textContent.trim();
-                  // 排除一些常见的非用户名文本
-                  if (text && text !== '登录' && text !== '注册' && text.length < 30) {
-                    return text;
+          if (!tempWindow.isDestroyed()) {
+            const userInfo = await tempWindow.webContents.executeJavaScript(`
+              (function() {
+                // 尝试从头像旁边的用户名获取
+                const selectors = [
+                  '[data-e2e="user-info"] [class*="name"]',
+                  '[data-e2e="user-info"] span',
+                  '.avatar-wrapper [class*="name"]',
+                  'header [class*="user-name"]',
+                  'header [class*="UserName"]',
+                  '[class*="nickname"]',
+                  '[class*="NickName"]',
+                  '[class*="user-name"]',
+                  '[class*="username"]',
+                  'a[href*="/user/"] [class*="name"]'
+                ];
+                
+                for (const sel of selectors) {
+                  const el = document.querySelector(sel);
+                  if (el && el.textContent && el.textContent.trim()) {
+                    const text = el.textContent.trim();
+                    if (text && text !== '登录' && text !== '注册' && text.length < 30 && text.length > 0) {
+                      return text;
+                    }
                   }
                 }
-              }
-              
-              // 尝试从页面标题获取
-              const title = document.title;
-              if (title && title.includes('@')) {
-                const match = title.match(/@([^\\s]+)/);
-                if (match) return match[1];
-              }
-              
-              return '';
-            })()
-          `);
-          
-          if (userInfo) {
-            name = userInfo;
+                
+                // 从页面标题获取
+                const title = document.title;
+                if (title && title.includes('@')) {
+                  const match = title.match(/@([^\\s]+)/);
+                  if (match) return match[1];
+                }
+                
+                return '';
+              })()
+            `);
+            
+            if (userInfo) {
+              name = userInfo;
+            }
+            tempWindow.close();
           }
-          
-          tempWindow.close();
         } catch (e) {
           logger.warn(`从页面获取用户名失败: ${e.message}`);
         }

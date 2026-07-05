@@ -166,7 +166,7 @@ class Recorder {
 
   /**
    * 注入 CSS 防止页面滚动，确保捕获区域固定
-   * 强制页面内容限制在视口范围内
+   * 使用 clip 方式确保捕获区域严格限制在视口范围
    */
   async injectNoScrollCSS() {
     if (!this.captureWindow || this.captureWindow.isDestroyed()) return;
@@ -180,26 +180,23 @@ class Recorder {
           const style = document.createElement('style');
           style.setAttribute('data-recorder', 'true');
           style.textContent = \`
-            /* 强制 html/body 严格限制在视口大小 */
-            html, body {
+            /* 严格限制页面尺寸，禁止溢出 */
+            html {
               width: 100vw !important;
               height: 100vh !important;
-              max-width: 100vw !important;
+              overflow: hidden !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              border: none !important;
+            }
+            body {
+              width: 100vw !important;
+              height: 100vh !important;
               max-height: 100vh !important;
               overflow: hidden !important;
               margin: 0 !important;
               padding: 0 !important;
-              position: fixed !important;
-              top: 0 !important;
-              left: 0 !important;
             }
-            
-            /* 所有直接子元素也限制在视口内 */
-            body > * {
-              max-height: 100vh !important;
-              overflow: hidden !important;
-            }
-            
             /* 隐藏滚动条 */
             ::-webkit-scrollbar { display: none !important; }
             * { scrollbar-width: none !important; }
@@ -211,47 +208,36 @@ class Recorder {
           document.documentElement.scrollTop = 0;
           document.body.scrollTop = 0;
           
-          // 持续阻止滚动和页面尺寸变化
-          const preventScroll = (e) => {
-            e.preventDefault();
-            window.scrollTo(0, 0);
-            return false;
-          };
-          
-          // 移除旧监听器
+          // 持续阻止滚动
           if (window._recorderScrollHandler) {
             window.removeEventListener('scroll', window._recorderScrollHandler);
             window.removeEventListener('wheel', window._recorderScrollHandler);
             window.removeEventListener('touchmove', window._recorderScrollHandler);
           }
-          if (window._recorderResizeHandler) {
-            window.removeEventListener('resize', window._recorderResizeHandler);
-          }
           
-          window._recorderScrollHandler = preventScroll;
-          window.addEventListener('scroll', preventScroll, { passive: false, capture: true });
-          window.addEventListener('wheel', preventScroll, { passive: false, capture: true });
-          window.addEventListener('touchmove', preventScroll, { passive: false, capture: true });
+          window._recorderScrollHandler = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.scrollTo(0, 0);
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+            return false;
+          };
           
-          // 定时重置滚动位置和尺寸
+          window.addEventListener('scroll', window._recorderScrollHandler, { passive: false, capture: true });
+          window.addEventListener('wheel', window._recorderScrollHandler, { passive: false, capture: true });
+          window.addEventListener('touchmove', window._recorderScrollHandler, { passive: false, capture: true });
+          
+          // 定时重置滚动位置
           if (window._recorderScrollInterval) clearInterval(window._recorderScrollInterval);
           window._recorderScrollInterval = setInterval(() => {
-            // 强制重置滚动
-            if (window.scrollY !== 0 || document.documentElement.scrollTop !== 0) {
+            if (window.scrollY !== 0 || document.documentElement.scrollTop !== 0 || document.body.scrollTop !== 0) {
               window.scrollTo(0, 0);
-            }
-            // 强制 body 尺寸不超过视口
-            const vh = window.innerHeight;
-            const vw = window.innerWidth;
-            if (document.body.scrollHeight > vh || document.body.scrollWidth > vw) {
-              document.body.style.height = vh + 'px';
-              document.body.style.width = vw + 'px';
-              document.body.style.overflow = 'hidden';
             }
           }, 200);
         })();
       `);
-      logger.info('[Recorder] 已注入防滚动 CSS，视口限制生效');
+      logger.info('[Recorder] 已注入防滚动 CSS');
     } catch (e) {
       logger.warn('[Recorder] 注入防滚动 CSS 失败:', e.message);
     }
@@ -432,14 +418,20 @@ class Recorder {
       }
 
       try {
-        const image = await this.captureWindow.webContents.capturePage();
+        // 使用 capturePage 的 rect 参数，严格只捕获视口区域 (0,0,1920,1080)
+        const image = await this.captureWindow.webContents.capturePage({
+          x: 0,
+          y: 0,
+          width: CAPTURE_WIDTH,
+          height: CAPTURE_HEIGHT
+        });
         
-        // 获取图像实际尺寸
+        // 获取图像实际尺寸并验证
         const imgSize = image.getSize();
         let bitmap;
         
         if (imgSize.width !== CAPTURE_WIDTH || imgSize.height !== CAPTURE_HEIGHT) {
-          // 图像尺寸不匹配，裁剪到视口大小 (从左上角 0,0 开始)
+          // 如果尺寸不匹配，裁剪到正确大小
           const croppedImage = image.crop({
             x: 0,
             y: 0,
@@ -448,12 +440,10 @@ class Recorder {
           });
           bitmap = croppedImage.getBitmap();
           
-          // 如果裁剪后尺寸仍然不对（页面内容比视口小），需要填充
-          const expectedSize = CAPTURE_WIDTH * CAPTURE_HEIGHT * 4; // BGRA = 4 bytes per pixel
+          // 如果裁剪后仍然小于预期，用黑色填充
+          const expectedSize = CAPTURE_WIDTH * CAPTURE_HEIGHT * 4;
           if (bitmap.length < expectedSize) {
-            // 创建全黑帧填充
             const paddedBuffer = Buffer.alloc(expectedSize, 0);
-            // 逐行复制
             for (let row = 0; row < Math.min(imgSize.height, CAPTURE_HEIGHT); row++) {
               const srcOffset = row * imgSize.width * 4;
               const dstOffset = row * CAPTURE_WIDTH * 4;
@@ -508,8 +498,11 @@ class Recorder {
     // 关闭 FFmpeg
     if (this.ffmpegProcess && this.ffmpegProcess.stdin) {
       return new Promise((resolve) => {
-        this.ffmpegProcess.stdin.end();
-        this.ffmpegProcess.on('close', () => {
+        let resolved = false;
+        const done = () => {
+          if (resolved) return;
+          resolved = true;
+          
           // 获取文件大小
           let fileSize = 0;
           try {
@@ -530,14 +523,17 @@ class Recorder {
             frameCount: this.frameCount
           });
           resolve();
-        });
+        };
+        
+        this.ffmpegProcess.stdin.end();
+        this.ffmpegProcess.on('close', done);
 
         // 超时强制结束
         setTimeout(() => {
           if (this.ffmpegProcess) {
-            this.ffmpegProcess.kill('SIGKILL');
+            try { this.ffmpegProcess.kill('SIGKILL'); } catch (e) { /* ignore */ }
           }
-          resolve();
+          done();
         }, 10000);
       });
     }

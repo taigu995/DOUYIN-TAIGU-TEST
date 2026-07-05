@@ -567,15 +567,37 @@ window.handleRemoveStream = async function (roomId) {
 
 window.handleToggleAutoRecord = async function (roomId) {
   if (!isElectron) return;
+  
+  // 先本地立即更新UI（乐观更新）
+  const stream = streamsData.find(s => s.roomId === roomId);
+  if (stream) {
+    stream.autoRecord = stream.autoRecord === false ? true : false;
+    renderStreamsList(streamsData);
+  }
+  
   try {
     const result = await window.electronAPI.toggleAutoRecord(roomId);
     if (result.success) {
       showToast(result.autoRecord ? '已开启自动录制' : '已关闭自动录制', 'success');
-      const status = await window.electronAPI.getAllStatus();
-      streamsData = status || [];
-      renderStreamsList(streamsData);
+      // 同步服务端状态
+      if (stream) {
+        stream.autoRecord = result.autoRecord;
+        renderStreamsList(streamsData);
+      }
+    } else {
+      // 回滚
+      if (stream) {
+        stream.autoRecord = !stream.autoRecord;
+        renderStreamsList(streamsData);
+      }
+      showToast('切换失败: ' + result.error, 'error');
     }
   } catch (err) {
+    // 回滚
+    if (stream) {
+      stream.autoRecord = !stream.autoRecord;
+      renderStreamsList(streamsData);
+    }
     showToast('切换出错: ' + err.message, 'error');
   }
 };
