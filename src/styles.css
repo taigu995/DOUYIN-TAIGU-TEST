@@ -1127,6 +1127,28 @@ body {
   flex-wrap: wrap;
 }
 
+/* ========== 音频状态指示器 ========== */
+.audio-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+.audio-indicator.has-audio {
+  background: rgba(35, 134, 54, 0.15);
+  color: #3fb950;
+}
+
+.audio-indicator.no-audio {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+}
+
 /* ========== 响应式 ========== */
 @media (max-width: 600px) {
   .settings-panel {

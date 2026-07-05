@@ -547,6 +547,7 @@ function createStreamCard(stream) {
         <span class="status-dot ${status.dotClass}"></span>
         <span class="status-text ${status.textClass}">${status.text}</span>
         ${durationText ? `<span class="stream-duration">${durationText}</span>` : ''}
+        ${isRecording ? `<span class="audio-indicator ${stream.recorder && stream.recorder.hasAudio ? 'has-audio' : 'no-audio'}" title="${stream.recorder && stream.recorder.hasAudio ? '录制含声音' : '仅录制画面（无声音）'}">${stream.recorder && stream.recorder.hasAudio ? '🔊 有声' : '🔇 无声'}</span>` : ''}
       </div>
       ${stream.lastCheck ? `<span style="font-size:11px;color:var(--text-muted)">上次检测: ${formatTime(stream.lastCheck)}</span>` : ''}
     </div>

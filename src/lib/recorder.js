@@ -68,6 +68,7 @@ class Recorder {
     this.outputFile = '';
     this.startTime = null;
     this.frameCount = 0;
+    this.hasAudio = false; // 是否包含音频
     this.onStatusChange = options.onStatusChange || (() => {});
     this.onError = options.onError || (() => {});
   }
@@ -572,8 +573,10 @@ class Recorder {
       if (audioDevice) {
         args.push('-f', 'dshow', '-i', `audio=${audioDevice}`);
         args.push('-c:a', 'aac', '-b:a', '192k');
+        this.hasAudio = true;
         logger.info(`[Recorder] 音频设备: ${audioDevice}`);
       } else {
+        this.hasAudio = false;
         logger.warn('[Recorder] 未检测到音频设备，仅录制视频（无声音）');
       }
 
@@ -827,6 +830,7 @@ class Recorder {
       outputFile: this.outputFile,
       frameCount: this.frameCount,
       startTime: this.startTime,
+      hasAudio: this.hasAudio,
       duration: this.startTime ? Date.now() - this.startTime.getTime() : 0
     };
   }
