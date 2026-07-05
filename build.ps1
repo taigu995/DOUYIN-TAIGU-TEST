@@ -185,10 +185,19 @@ if ($buildSuccess) {
     & npm config set electron_mirror https://npmmirror.com/mirrors/electron/ 2>&1 | Out-Null
     Write-Log "Mirror configured: npmmirror.com" "OK"
     
+    # Approve build scripts for packages that need postinstall (electron, ffmpeg, etc.)
+    # Required for pnpm v11+ which blocks build scripts by default
+    Write-Log "Approving build scripts for electron/ffmpeg..." "INFO"
+    try {
+        & pnpm approve-builds electron @ffmpeg-installer/ffmpeg electron-builder 2>&1 | Out-Null
+    } catch {
+        # If approve-builds not available (older pnpm), package.json pnpm config handles it
+    }
+    
     Write-Log "Running pnpm install (first time may take several minutes)..." "STEP"
     Write-Host ""
     
-    $installOutput = & pnpm install 2>&1
+    $installOutput = & pnpm install --config.confirmModulesPurge=false 2>&1
     $installExitCode = $LASTEXITCODE
     
     $installOutput | ForEach-Object {
