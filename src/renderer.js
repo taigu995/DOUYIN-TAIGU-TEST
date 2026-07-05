@@ -475,11 +475,8 @@ function createStreamCard(stream) {
         </div>
       </div>
       <div class="stream-actions">
-        <button class="btn-icon btn-toggle-record ${stream.autoRecord !== false ? 'active' : ''}" onclick="handleToggleAutoRecord('${stream.roomId}')" title="${stream.autoRecord !== false ? '关闭自动录制' : '开启自动录制'}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/>
-          </svg>
+        <button class="btn btn-sm ${stream.autoRecord !== false ? 'btn-success' : 'btn-ghost'}" onclick="handleToggleAutoRecord('${stream.roomId}')" title="${stream.autoRecord !== false ? '点击关闭自动录制' : '点击开启自动录制'}">
+          ${stream.autoRecord !== false ? '自动录制: 开' : '自动录制: 关'}
         </button>
         ${isRecording
           ? `<button class="btn btn-danger btn-sm" onclick="handleStopRecording('${stream.roomId}')">停止录制</button>`
