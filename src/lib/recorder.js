@@ -140,11 +140,10 @@ class Recorder {
     try {
       await this.captureWindow.webContents.executeJavaScript(`
         (function() {
-          // 尝试找到视频元素并播放（不静音，以捕获音频）
+          // 尝试找到视频元素并播放（离屏模式下静音，防止音频从扬声器输出）
           const videos = document.querySelectorAll('video');
           for (const video of videos) {
-            video.muted = false;
-            video.volume = 1.0; // 最大音量
+            video.muted = true; // 静音，防止音频从系统扬声器输出
             if (video.paused) {
               video.play().catch(() => {});
             }
@@ -472,81 +471,195 @@ class Recorder {
 
   /**
    * 从抖音直播页面提取直播流URL
+   * 优先使用API方式，回退到DOM解析
    */
   async extractStreamUrl() {
-    if (!this.captureWindow || this.captureWindow.isDestroyed()) return null;
-
     try {
-      const result = await this.captureWindow.webContents.executeJavaScript(`
-        (async () => {
-          try {
-            // 方法1: 从 RENDER_DATA 中提取
-            const renderScript = document.getElementById('RENDER_DATA');
-            if (renderScript) {
-              const data = JSON.parse(decodeURIComponent(renderScript.textContent));
-              // 遍历查找 stream_url
-              const findStreamUrl = (obj) => {
-                if (!obj || typeof obj !== 'object') return null;
-                if (obj.stream_url && (obj.stream_url.flv_pull_url || obj.stream_url.hls_pull_url_map)) {
-                  return obj.stream_url;
-                }
-                for (const key of Object.keys(obj)) {
-                  const result = findStreamUrl(obj[key]);
-                  if (result) return result;
-                }
-                return null;
-              };
-              const streamUrl = findStreamUrl(data);
-              if (streamUrl) {
-                const flvUrl = streamUrl.flv_pull_url && Object.values(streamUrl.flv_pull_url)[0];
-                const hlsUrl = streamUrl.hls_pull_url_map && Object.values(streamUrl.hls_pull_url_map)[0];
-                return { url: flvUrl || hlsUrl, type: flvUrl ? 'flv' : 'hls', source: 'RENDER_DATA' };
-              }
-            }
-
-            // 方法2: 从 __NEXT_DATA__ 中提取
-            const nextDataScript = document.getElementById('__NEXT_DATA__');
-            if (nextDataScript) {
-              const data = JSON.parse(nextDataScript.textContent);
-              const findStreamUrl = (obj) => {
-                if (!obj || typeof obj !== 'object') return null;
-                if (obj.stream_url) return obj.stream_url;
-                for (const key of Object.keys(obj)) {
-                  const result = findStreamUrl(obj[key]);
-                  if (result) return result;
-                }
-                return null;
-              };
-              const streamUrl = findStreamUrl(data);
-              if (streamUrl) {
-                const flvUrl = streamUrl.flv_pull_url && Object.values(streamUrl.flv_pull_url)[0];
-                const hlsUrl = streamUrl.hls_pull_url_map && Object.values(streamUrl.hls_pull_url_map)[0];
-                return { url: flvUrl || hlsUrl, type: flvUrl ? 'flv' : 'hls', source: '__NEXT_DATA__' };
-              }
-            }
-
-            // 方法3: 从页面中的 video 元素获取 src
-            const videos = document.querySelectorAll('video');
-            for (const video of videos) {
-              const src = video.src || video.currentSrc;
-              if (src && (src.includes('.flv') || src.includes('live') || src.includes('.m3u8'))) {
-                return { url: src, type: src.includes('.m3u8') ? 'hls' : 'flv', source: 'video_element' };
-              }
-            }
-
-            return null;
-          } catch (e) {
-            return { error: e.message };
-          }
-        })()
-      `);
-
-      if (result && result.url) {
-        logger.info(`[Recorder] 提取到直播流URL (来源: ${result.source}, 类型: ${result.type})`);
-        return result;
-      } else if (result && result.error) {
-        logger.warn(`[Recorder] 提取直播流URL出错: ${result.error}`);
+      // 方法1: 通过抖音API获取直播流URL（最可靠）
+      const apiUrl = `https://live.douyin.com/webcast/room/web/enter/?aid=6383&live_id=1&device_platform=web&language=zh-CN&enter_from=web_live&cookie_enabled=true&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=120.0.0.0&web_rid=${this.roomId}`;
+      
+      logger.info(`[Recorder] 尝试通过API获取直播流URL, roomId: ${this.roomId}`);
+      
+      // 获取session cookies
+      const cookies = await this._getSessionCookies('live.douyin.com');
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': `https://live.douyin.com/${this.roomId}`,
+        'Accept': 'application/json, text/plain, */*',
+      };
+      if (cookies) {
+        headers['Cookie'] = cookies;
       }
+
+      const https = require('https');
+      const http = require('http');
+      const urlModule = require('url');
+      
+      const apiResult = await new Promise((resolve) => {
+        const parsedUrl = urlModule.parse(apiUrl);
+        const client = parsedUrl.protocol === 'https:' ? https : http;
+        
+        const req = client.get(apiUrl, { headers, timeout: 10000 }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            try {
+              const json = JSON.parse(data);
+              resolve({ success: true, data: json });
+            } catch (e) {
+              resolve({ success: false, error: 'JSON解析失败', raw: data.substring(0, 200) });
+            }
+          });
+        });
+        req.on('error', (e) => resolve({ success: false, error: e.message }));
+        req.on('timeout', () => { req.destroy(); resolve({ success: false, error: '请求超时' }); });
+      });
+
+      if (apiResult.success && apiResult.data) {
+        const roomData = apiResult.data.data || apiResult.data;
+        // 尝试从API响应中提取流URL
+        const roomInfo = roomData.data && roomData.data[0] ? roomData.data[0] : roomData;
+        
+        // 查找 stream_url
+        let streamUrl = null;
+        const findStreamUrl = (obj, depth = 0) => {
+          if (!obj || typeof obj !== 'object' || depth > 10) return null;
+          if (obj.stream_url && (obj.stream_url.flv_pull_url || obj.stream_url.hls_pull_url_map)) {
+            return obj.stream_url;
+          }
+          for (const key of Object.keys(obj)) {
+            const result = findStreamUrl(obj[key], depth + 1);
+            if (result) return result;
+          }
+          return null;
+        };
+
+        streamUrl = findStreamUrl(roomInfo);
+        
+        if (!streamUrl && roomData.data) {
+          // 尝试遍历 data 数组
+          const dataArray = Array.isArray(roomData.data) ? roomData.data : [roomData.data];
+          for (const item of dataArray) {
+            streamUrl = findStreamUrl(item);
+            if (streamUrl) break;
+          }
+        }
+
+        if (streamUrl) {
+          const flvUrls = streamUrl.flv_pull_url || {};
+          const hlsUrls = streamUrl.hls_pull_url_map || {};
+          
+          // 按清晰度选择最高画质
+          const qualityOrder = ['FULL_HD1', 'HD1', 'SD1', 'SD2', 'LD1'];
+          let flvUrl = null;
+          for (const q of qualityOrder) {
+            if (flvUrls[q]) { flvUrl = flvUrls[q]; break; }
+          }
+          if (!flvUrl) flvUrl = Object.values(flvUrls)[0];
+          
+          let hlsUrl = null;
+          for (const q of qualityOrder) {
+            if (hlsUrls[q]) { hlsUrl = hlsUrls[q]; break; }
+          }
+          if (!hlsUrl) hlsUrl = Object.values(hlsUrls)[0];
+
+          const finalUrl = flvUrl || hlsUrl;
+          if (finalUrl) {
+            logger.info(`[Recorder] API获取直播流成功 (类型: ${flvUrl ? 'flv' : 'hls'}, 画质: ${Object.keys(flvUrls).join(',') || Object.keys(hlsUrls).join(',')})`);
+            return { url: finalUrl, type: flvUrl ? 'flv' : 'hls', source: 'API' };
+          }
+        }
+        
+        logger.warn(`[Recorder] API返回数据中未找到stream_url, keys: ${JSON.stringify(Object.keys(roomInfo || {})).substring(0, 200)}`);
+      } else {
+        logger.warn(`[Recorder] API请求失败: ${apiResult.error || '未知错误'}, raw: ${(apiResult.raw || '').substring(0, 100)}`);
+      }
+
+      // 方法2: 从页面DOM中提取（回退方案）
+      if (this.captureWindow && !this.captureWindow.isDestroyed()) {
+        logger.info('[Recorder] 尝试从页面DOM提取直播流URL...');
+        const domResult = await this.captureWindow.webContents.executeJavaScript(`
+          (async () => {
+            try {
+              // 从 RENDER_DATA 中提取
+              const renderScript = document.getElementById('RENDER_DATA');
+              if (renderScript) {
+                const data = JSON.parse(decodeURIComponent(renderScript.textContent));
+                const findStreamUrl = (obj, depth) => {
+                  if (!obj || typeof obj !== 'object' || depth > 10) return null;
+                  if (obj.stream_url && (obj.stream_url.flv_pull_url || obj.stream_url.hls_pull_url_map)) {
+                    return obj.stream_url;
+                  }
+                  for (const key of Object.keys(obj)) {
+                    const result = findStreamUrl(obj[key], depth + 1);
+                    if (result) return result;
+                  }
+                  return null;
+                };
+                const streamUrl = findStreamUrl(data, 0);
+                if (streamUrl) {
+                  const flvUrl = streamUrl.flv_pull_url && Object.values(streamUrl.flv_pull_url)[0];
+                  const hlsUrl = streamUrl.hls_pull_url_map && Object.values(streamUrl.hls_pull_url_map)[0];
+                  return { url: flvUrl || hlsUrl, type: flvUrl ? 'flv' : 'hls', source: 'RENDER_DATA' };
+                }
+              }
+
+              // 从 __NEXT_DATA__ 中提取
+              const nextDataScript = document.getElementById('__NEXT_DATA__');
+              if (nextDataScript) {
+                const data = JSON.parse(nextDataScript.textContent);
+                const findStreamUrl = (obj, depth) => {
+                  if (!obj || typeof obj !== 'object' || depth > 10) return null;
+                  if (obj.stream_url) return obj.stream_url;
+                  for (const key of Object.keys(obj)) {
+                    const result = findStreamUrl(obj[key], depth + 1);
+                    if (result) return result;
+                  }
+                  return null;
+                };
+                const streamUrl = findStreamUrl(data, 0);
+                if (streamUrl) {
+                  const flvUrl = streamUrl.flv_pull_url && Object.values(streamUrl.flv_pull_url)[0];
+                  const hlsUrl = streamUrl.hls_pull_url_map && Object.values(streamUrl.hls_pull_url_map)[0];
+                  return { url: flvUrl || hlsUrl, type: flvUrl ? 'flv' : 'hls', source: '__NEXT_DATA__' };
+                }
+              }
+
+              // 从 video 元素获取 src
+              const videos = document.querySelectorAll('video');
+              for (const video of videos) {
+                const src = video.src || video.currentSrc;
+                if (src && (src.includes('.flv') || src.includes('live') || src.includes('.m3u8'))) {
+                  return { url: src, type: src.includes('.m3u8') ? 'hls' : 'flv', source: 'video_element' };
+                }
+              }
+
+              // 从页面源码中搜索流URL
+              const pageText = document.documentElement.innerHTML;
+              const flvMatch = pageText.match(/https?:\/\/[^"'\s]+\.flv[^"'\s]*/);
+              if (flvMatch) {
+                return { url: flvMatch[0], type: 'flv', source: 'page_text' };
+              }
+              const m3u8Match = pageText.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/);
+              if (m3u8Match) {
+                return { url: m3u8Match[0], type: 'hls', source: 'page_text' };
+              }
+
+              return null;
+            } catch (e) {
+              return { error: e.message };
+            }
+          })()
+        `);
+
+        if (domResult && domResult.url) {
+          logger.info(`[Recorder] 从DOM提取到直播流URL (来源: ${domResult.source}, 类型: ${domResult.type})`);
+          return domResult;
+        } else if (domResult && domResult.error) {
+          logger.warn(`[Recorder] DOM提取直播流URL出错: ${domResult.error}`);
+        }
+      }
+
       return null;
     } catch (e) {
       logger.warn(`[Recorder] 提取直播流URL失败: ${e.message}`);
