@@ -60,19 +60,42 @@
     <!-- 添加直播间区域 -->
     <section class="add-section">
       <div class="add-input-group">
-        <textarea
-          id="input-url"
-          class="input-url"
-          placeholder="输入房间号、直播链接或分享文本，例如：&#10;房间号：123456&#10;链接：https://v.douyin.com/xxxxx/&#10;分享文本：#在抖音，记录美好生活#【主播名】正在直播... https://v.douyin.com/xxxxx/"
-          rows="3"
-        ></textarea>
-        <button id="btn-add" class="btn btn-primary">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-          添加直播间
-        </button>
+        <div class="input-row">
+          <div class="input-item">
+            <label class="input-label">房间号</label>
+            <input
+              type="text"
+              id="input-room-id"
+              class="input-field"
+              placeholder="如：123456"
+            />
+          </div>
+          <div class="input-item">
+            <label class="input-label">主播主页链接</label>
+            <input
+              type="text"
+              id="input-profile-url"
+              class="input-field"
+              placeholder="https://v.douyin.com/xxxxx/"
+            />
+          </div>
+          <div class="input-item">
+            <label class="input-label">直播间链接</label>
+            <input
+              type="text"
+              id="input-live-url"
+              class="input-field"
+              placeholder="https://live.douyin.com/xxxxx"
+            />
+          </div>
+          <button id="btn-add" class="btn btn-primary btn-add">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            添加
+          </button>
+        </div>
       </div>
       <div id="add-error" class="error-msg" style="display:none;"></div>
     </section>

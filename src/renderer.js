@@ -8,7 +8,9 @@ const isElectron = typeof window.electronAPI !== 'undefined';
 
 // DOM 元素
 const elements = {
-  inputUrl: document.getElementById('input-url'),
+  inputRoomId: document.getElementById('input-room-id'),
+  inputProfileUrl: document.getElementById('input-profile-url'),
+  inputLiveUrl: document.getElementById('input-live-url'),
   btnAdd: document.getElementById('btn-add'),
   addError: document.getElementById('add-error'),
   streamsList: document.getElementById('streams-list'),
@@ -121,10 +123,13 @@ async function init() {
 // ========== 事件绑定 ==========
 function bindEvents() {
   elements.btnAdd.addEventListener('click', handleAddStream);
-  elements.inputUrl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.ctrlKey) {
-      handleAddStream();
-    }
+  // Enter 键添加
+  [elements.inputRoomId, elements.inputProfileUrl, elements.inputLiveUrl].forEach(input => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        handleAddStream();
+      }
+    });
   });
 
   elements.btnLogin.addEventListener('click', async () => {
@@ -164,9 +169,27 @@ function bindEvents() {
 
 // ========== 添加直播间 ==========
 async function handleAddStream() {
-  const text = elements.inputUrl.value.trim();
-  if (!text) {
-    showError('请输入直播间链接或分享文本');
+  const roomId = elements.inputRoomId.value.trim();
+  const profileUrl = elements.inputProfileUrl.value.trim();
+  const liveUrl = elements.inputLiveUrl.value.trim();
+
+  // 确定使用哪个输入
+  let inputText = '';
+  let inputType = '';
+
+  if (roomId) {
+    inputText = roomId;
+    inputType = 'roomId';
+  } else if (profileUrl) {
+    inputText = profileUrl;
+    inputType = 'profileUrl';
+  } else if (liveUrl) {
+    inputText = liveUrl;
+    inputType = 'liveUrl';
+  }
+
+  if (!inputText) {
+    showError('请至少输入一个房间号或链接');
     return;
   }
 
@@ -176,10 +199,13 @@ async function handleAddStream() {
 
   try {
     if (isElectron) {
-      const result = await window.electronAPI.addStream(text);
+      const result = await window.electronAPI.addStream(inputText);
       if (result.success) {
         showToast(`已添加直播间: ${result.data.streamerName}`, 'success');
-        elements.inputUrl.value = '';
+        // 清空对应输入框
+        if (inputType === 'roomId') elements.inputRoomId.value = '';
+        else if (inputType === 'profileUrl') elements.inputProfileUrl.value = '';
+        else if (inputType === 'liveUrl') elements.inputLiveUrl.value = '';
         // 刷新列表
         const status = await window.electronAPI.getAllStatus();
         streamsData = status || [];
@@ -195,7 +221,7 @@ async function handleAddStream() {
     showError('添加失败: ' + err.message);
   } finally {
     elements.btnAdd.disabled = false;
-    elements.btnAdd.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> 添加直播间`;
+    elements.btnAdd.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> 添加`;
   }
 }
 
