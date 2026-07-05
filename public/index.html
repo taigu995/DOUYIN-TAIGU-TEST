@@ -136,15 +136,16 @@
       <div class="info">
         <h3>使用说明</h3>
         <ol>
-          <li>解压下载的压缩包到任意目录</li>
-          <li>双击 <code>一键封装.bat</code> 运行</li>
+          <li>解压下载的压缩包到任意目录（路径不要含中文）</li>
+          <li>双击 <code>一键封装.bat</code> 运行（会自动调用 PowerShell 脚本）</li>
           <li>脚本自动检测环境，缺失的 Node.js / pnpm 会自动下载安装</li>
-          <li>安装完成后自动打包生成 EXE 安装包</li>
-          <li>生成的 EXE 在 <code>dist/</code> 目录中</li>
+          <li>自动配置国内镜像加速，安装依赖并打包生成 EXE</li>
+          <li>生成的 EXE 安装包在 <code>dist/</code> 目录中</li>
         </ol>
         <div class="note">
           注意：首次封装需要联网下载依赖（约 500MB），请确保网络畅通。
           封装过程日志保存在 <code>build_log.txt</code> 中，如遇问题可据此排查。
+          如遇到权限问题，请右键 <code>一键封装.bat</code> 选择「以管理员身份运行」。
         </div>
       </div>
 
