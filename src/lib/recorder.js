@@ -70,12 +70,7 @@ class Recorder {
     this.startTime = null;
     this.frameCount = 0;
     this.hasAudio = false; // 是否包含音频
-    
-    // 音视频同步时间戳（系统时间）
-    this._audioDataStartTime = 0;  // 音频首包数据时间
-    this._videoDataStartTime = 0;  // 视频首帧数据时间
-    this._audioProcessStartTime = 0; // 音频进程启动时间
-    this._videoProcessStartTime = 0; // 视频进程启动时间
+    this._streamUrl = null; // 直播流URL（方案A：用于音频输入）
     
     this.onStatusChange = options.onStatusChange || (() => {});
     this.onError = options.onError || (() => {});
@@ -810,201 +805,6 @@ class Recorder {
     }
   }
 
-  /**
-   * 启动音频捕获（从直播流提取音频，与离屏渲染视频同步录制）
-   */
-  _startAudioCapture(streamInfo) {
-    try {
-      const ffmpegPath = getFFmpegPath();
-      // 音频临时文件（录制结束后会合并到最终文件并删除）
-      this._audioTempFile = this.outputFile.replace(/\.mp4$/, '_audio.aac');
-      this._videoTempFile = this.outputFile.replace(/\.mp4$/, '_video.mp4');
-      this._audioCaptureSuccess = false; // 标记音频是否成功录制
-
-      const args = [
-        '-y',
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
-        '-i', streamInfo.url,
-        '-vn',                    // 不要视频
-        '-c:a', 'aac',            // 音频编码 AAC
-        '-b:a', '192k',           // 音频比特率
-        '-f', 'adts',             // 输出 ADTS AAC 格式（无需 moov atom，更稳定）
-        this._audioTempFile
-      ];
-
-      logger.info(`[Recorder] 启动音频捕获 FFmpeg: ${streamInfo.url.substring(0, 80)}...`);
-      this._audioStartTime = Date.now(); // 记录音频启动时间戳
-
-      this._audioProcess = spawn(ffmpegPath, args, {
-        windowsHide: true
-      });
-
-      this._audioProcess.stderr.on('data', (data) => {
-        const msg = data.toString();
-        if (msg.includes('time=') || msg.includes('frame=')) {
-          // 有进度输出说明音频正在录制
-          this._audioCaptureSuccess = true;
-          // 记录音频数据开始时间（首次检测到数据输出）
-          if (!this._audioDataStartTime) {
-            this._audioDataStartTime = Date.now();
-            logger.info(`[Recorder-Audio] 音频数据开始输出, 系统时间戳: ${this._audioDataStartTime}`);
-          }
-        } else if (msg.includes('Error') || msg.includes('error')) {
-          logger.warn(`[Recorder-Audio] ${msg.trim()}`);
-        }
-      });
-
-      this._audioProcess.on('close', (code) => {
-        logger.info(`[Recorder-Audio] 音频进程退出, code: ${code}`);
-        // 检查音频文件是否有效
-        if (this._audioTempFile && fs.existsSync(this._audioTempFile)) {
-          const stat = fs.statSync(this._audioTempFile);
-          if (stat.size > 0) {
-            this._audioCaptureSuccess = true;
-            logger.info(`[Recorder-Audio] 音频文件有效, 大小: ${(stat.size / 1024).toFixed(1)}KB`);
-          } else {
-            this._audioCaptureSuccess = false;
-            logger.warn('[Recorder-Audio] 音频文件为空');
-          }
-        } else {
-          this._audioCaptureSuccess = false;
-          logger.warn('[Recorder-Audio] 音频文件不存在');
-        }
-      });
-
-      this._audioProcess.on('error', (err) => {
-        logger.error(`[Recorder-Audio] 音频进程错误: ${err.message}`);
-      });
-
-    } catch (e) {
-      logger.warn(`[Recorder] 启动音频捕获失败: ${e.message}`);
-      this.hasAudio = false;
-    }
-  }
-
-  /**
-   * 合并视频和音频文件
-   */
-  async _mergeVideoAndAudio() {
-    if (!this._videoTempFile || !this._audioTempFile) return false;
-    if (!fs.existsSync(this._videoTempFile) || !fs.existsSync(this._audioTempFile)) return false;
-
-    // 检查音频文件是否有效（大于1KB）
-    try {
-      const audioStat = fs.statSync(this._audioTempFile);
-      if (audioStat.size < 1024) {
-        logger.warn(`[Recorder] 音频文件过小 (${audioStat.size} bytes)，跳过合并`);
-        return false;
-      }
-    } catch (e) {
-      logger.warn(`[Recorder] 无法读取音频文件: ${e.message}`);
-      return false;
-    }
-
-    try {
-      const ffmpegPath = getFFmpegPath();
-      
-      // 计算音视频时间戳偏移（单位：秒）
-      // 优先使用数据开始时间（更精确），回退到进程启动时间
-      const audioDataStart = this._audioDataStartTime || this._audioStartTime;
-      const videoDataStart = this._videoDataStartTime || this._videoStartTime;
-      
-      let audioOffset = 0;
-      if (audioDataStart && videoDataStart) {
-        // 正值表示音频比视频晚开始输出数据，需要对音频应用负偏移
-        // 负值表示音频比视频早开始输出数据，需要对音频应用正偏移
-        audioOffset = (audioDataStart - videoDataStart) / 1000;
-        logger.info(`[Recorder] 音视频数据时间戳: 音频=${audioDataStart}ms, 视频=${videoDataStart}ms`);
-        logger.info(`[Recorder] 音视频时间戳偏移: ${audioOffset.toFixed(3)}秒 (音频${audioOffset > 0 ? '晚' : '早'}于视频)`);
-      }
-      
-      const args = [
-        '-y',
-        '-i', this._videoTempFile,
-      ];
-      
-      // 如果音频比视频晚开始，需要对音频应用负偏移（让音频延迟播放）
-      // 如果音频比视频早开始，需要对音频应用正偏移（让音频提前播放）
-      if (Math.abs(audioOffset) > 0.05) { // 只在偏移>50ms时应用校正
-        args.push('-itsoffset', audioOffset.toFixed(3));
-      }
-      
-      args.push(
-        '-f', 'aac',             // 指定音频输入格式为 ADTS AAC
-        '-i', this._audioTempFile,
-        '-c:v', 'copy',           // 视频直接复制（不重新编码）
-        '-c:a', 'copy',           // 音频直接复制（不重新编码，兼容性更好）
-        '-map', '0:v:0',          // 从第一个输入取视频
-        '-map', '1:a:0',          // 从第二个输入取音频
-        '-shortest',              // 以最短的流为准
-        '-movflags', '+faststart',
-        this.outputFile
-      );
-
-      logger.info('[Recorder] 正在合并视频和音频...');
-      if (this.onMergeProgress) {
-        this.onMergeProgress(0);
-      }
-
-      return new Promise((resolve) => {
-        const mergeProcess = spawn(ffmpegPath, args, { windowsHide: true });
-        let mergeStderr = '';
-
-        mergeProcess.stderr.on('data', (data) => {
-          const msg = data.toString();
-          mergeStderr += msg;
-          // 解析合并进度
-          const timeMatch = msg.match(/time=(\d+):(\d+):(\d+)\.(\d+)/);
-          if (timeMatch && this.onMergeProgress) {
-            const totalSec = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3]);
-            if (totalSec > 0) {
-              this.onMergeProgress(Math.min(totalSec * 10, 90));
-            }
-          }
-        });
-
-        mergeProcess.on('close', (code) => {
-          if (code === 0) {
-            logger.info(`[Recorder] 合并完成: ${this.outputFile}`);
-            if (this.onMergeProgress) this.onMergeProgress(100);
-            // 删除临时文件
-            try { fs.unlinkSync(this._videoTempFile); } catch (e) { /* ignore */ }
-            try { fs.unlinkSync(this._audioTempFile); } catch (e) { /* ignore */ }
-            this._lastRecordingResult = { hasAudio: true, merged: true, saved: true };
-            resolve(true);
-          } else {
-            logger.warn(`[Recorder] 合并失败 (code: ${code})，保留纯视频文件`);
-            logger.warn(`[Recorder] 合并错误详情: ${mergeStderr.slice(-500)}`);
-            // 合并失败时，将视频文件重命名为最终文件
-            try {
-              fs.renameSync(this._videoTempFile, this.outputFile);
-              try { fs.unlinkSync(this._audioTempFile); } catch (e) { /* ignore */ }
-            } catch (e) { /* ignore */ }
-            this._lastRecordingResult = { hasAudio: true, merged: false, saved: true };
-            resolve(false);
-          }
-        });
-
-        mergeProcess.on('error', (err) => {
-          logger.error(`[Recorder] 合并进程错误: ${err.message}`);
-          try {
-            fs.renameSync(this._videoTempFile, this.outputFile);
-          } catch (e) { /* ignore */ }
-          this._lastRecordingResult = { hasAudio: true, merged: false, saved: true };
-          resolve(false);
-        });
-      });
-    } catch (e) {
-      logger.warn(`[Recorder] 合并异常: ${e.message}`);
-      try {
-        fs.renameSync(this._videoTempFile, this.outputFile);
-      } catch (e2) { /* ignore */ }
-      this._lastRecordingResult = { hasAudio: true, merged: false, saved: true };
-      return false;
-    }
-  }
 
   /**
    * 获取输出文件大小
@@ -1078,24 +878,21 @@ class Recorder {
       this.hasAudio = false;
       this._isStreamMode = false;
 
+      // 方案A：单FFmpeg进程同时处理视频和音频，实现天然同步
       if (streamInfo && streamInfo.url) {
-        // 同时启动音频捕获（从直播流提取音频）
-        logger.info('[Recorder] 使用混合模式：离屏渲染录制弹幕视频 + 直播流提取音频');
-        this._startAudioCapture(streamInfo);
+        logger.info('[Recorder] 使用方案A：单FFmpeg进程同时处理视频和音频');
         this.hasAudio = true;
         
-        // 等待音频流稳定（预热期）
-        logger.info('[Recorder] 等待音频流稳定 (3秒预热)...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        logger.info('[Recorder] 音频流预热完成，开始同步录制');
+        // 启动单FFmpeg进程（视频+音频）
+        logger.info(`[Recorder] 启动 FFmpeg 进程 (视频+音频), FPS: ${config.fps || 30}`);
+        this._streamUrl = streamInfo.url;
+        this.startFFmpegProcess(config.fps || 30, streamInfo.url);
       } else {
         logger.warn('[Recorder] 未能提取直播流URL，仅录制视频（无音频）');
+        this.hasAudio = false;
+        this.startFFmpegProcess(config.fps || 30, null);
       }
-
-      // 启动视频录制（离屏渲染 + FFmpeg 编码）
-      logger.info(`[Recorder] 启动 FFmpeg 视频进程, FPS: ${config.fps || 30}`);
-      this._videoStartTime = Date.now(); // 记录视频启动时间戳
-      this.startFFmpegProcess(config.fps || 30);
+      
       this.startCapture();
 
       this.recording = true;
@@ -1136,49 +933,63 @@ class Recorder {
 
   /**
    * 启动 FFmpeg 编码进程
+   * @param {number} fps - 帧率
+   * @param {string|null} streamUrl - 直播流URL（用于音频输入），null则无音频
    */
-  startFFmpegProcess(fps) {
-    // Electron 的 capturePage().getBitmap() 在 Windows 上返回 BGRA 格式
-    // 需要指定正确的输入像素格式
+  startFFmpegProcess(fps, streamUrl) {
     const resolvedPath = getFFmpegPath();
     const { spawn } = require('child_process');
 
-    // 同步检测音频设备（避免异步导致FFmpeg进程延迟启动）
-    const audioDevice = this._detectAudioDeviceSync();
-    
     // 捕获分辨率（用于FFmpeg输入尺寸）
-    // 使用较大尺寸以包含视频+右侧评论区，FFmpeg会自动缩放到输出尺寸
+    // 使用较大尺寸以包含视频+右侧评论区
     const captureWidth = 1600;
     const captureHeight = 900;
     
-    const args = [
-      // 视频输入（从管道读取原始帧）
+    const args = [];
+
+    // 如果有直播流URL，先添加音频输入（作为第一个输入）
+    if (streamUrl) {
+      args.push(
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        '-i', streamUrl,  // 音频输入（直播流）
+      );
+      logger.info(`[Recorder] 音频源: 直播流 (${streamUrl.substring(0, 60)}...)`);
+    }
+
+    // 视频输入（从管道读取原始帧）- 作为第二个输入
+    args.push(
       '-f', 'rawvideo',
       '-pix_fmt', 'bgra',
       '-s', `${captureWidth}x${captureHeight}`,
       '-r', String(fps),
       '-i', 'pipe:0',
-    ];
+    );
 
-    // 如果检测到音频设备，添加音频输入
-    if (audioDevice) {
-      args.push('-f', 'dshow', '-i', `audio=${audioDevice}`);
-      args.push('-c:a', 'aac', '-b:a', '192k');
-      this.hasAudio = true;
-      logger.info(`[Recorder] 音频设备: ${audioDevice}`);
-    } else {
-      this.hasAudio = false;
-      logger.warn('[Recorder] 未检测到音频设备，仅录制视频（无声音）');
-    }
-
+    // 音视频编码参数
     args.push(
       '-c:v', 'libx264',
       '-preset', 'medium',
       '-crf', '15',
       '-pix_fmt', 'yuv420p',
+    );
+
+    // 如果有音频，添加音频编码和映射
+    if (streamUrl) {
+      args.push(
+        '-map', '0:a',     // 第一个输入(直播流)的音频
+        '-map', '1:v',     // 第二个输入(pipe)的视频
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-shortest',       // 以最短的流为准
+      );
+    }
+
+    args.push(
       '-movflags', '+faststart',
       '-y',
-      this._audioTempFile ? this._videoTempFile : this.outputFile
+      this.outputFile
     );
 
     logger.info(`[Recorder] 启动 FFmpeg: ${resolvedPath}, 输入格式: bgra`);
@@ -1318,11 +1129,6 @@ class Recorder {
             if (this.ffmpegProcess.stdin.writable) {
               this.ffmpegProcess.stdin.write(bitmap);
               this.frameCount++;
-              // 记录视频数据开始时间（首帧写入）
-              if (this.frameCount === 1) {
-                this._videoDataStartTime = Date.now();
-                logger.info(`[Recorder-Video] 视频数据开始输出, 系统时间戳: ${this._videoDataStartTime}, 帧数: ${this.frameCount}`);
-              }
             }
           } catch (writeErr) {
             // 忽略写入错误，可能是进程正在关闭
@@ -1424,113 +1230,23 @@ class Recorder {
 
     // 离屏模式：关闭 stdin 让 FFmpeg 完成编码
     if (this.ffmpegProcess && this.ffmpegProcess.stdin) {
-      // 同时停止音频捕获进程
-      if (this._audioProcess) {
-        try {
-          // Windows: 使用 taskkill 确保进程终止
-          if (process.platform === 'win32') {
-            const { execSync } = require('child_process');
-            execSync(`taskkill /pid ${this._audioProcess.pid} /f /t`, { stdio: 'ignore' });
-          } else {
-            this._audioProcess.kill('SIGKILL');
-          }
-        } catch (e) { /* ignore */ }
-        this._audioProcess = null;
-      }
-
       return new Promise(async (resolve) => {
         let resolved = false;
-        const done = async () => {
+        const done = () => {
           if (resolved) return;
           resolved = true;
 
-          // 等待音频进程完全退出并写入文件
-          if (this._audioProcess) {
-            await new Promise(r => setTimeout(r, 1500));
-          }
-
-          // 直接检查音频文件是否有效（不依赖异步标记）
-          let audioFileValid = false;
-          if (this._audioTempFile && fs.existsSync(this._audioTempFile)) {
-            try {
-              const audioStat = fs.statSync(this._audioTempFile);
-              audioFileValid = audioStat.size > 1024; // 大于1KB认为有效
-              if (audioFileValid) {
-                logger.info(`[Recorder] 检测到有效音频文件, 大小: ${(audioStat.size / 1024).toFixed(1)}KB`);
-                this._audioCaptureSuccess = true;
-              } else {
-                logger.warn(`[Recorder] 音频文件过小 (${audioStat.size} bytes)，跳过合并`);
-              }
-            } catch (e) {
-              logger.warn(`[Recorder] 无法读取音频文件: ${e.message}`);
-            }
-          } else {
-            logger.info('[Recorder] 无音频临时文件');
-          }
-
-          let mergeResult = null; // null = 无音频, true = 合并成功, false = 合并失败
-
-          // 记录音视频时间戳信息
-          if (this._videoStartTime && this._audioStartTime) {
-            const offset = (this._audioStartTime - this._videoStartTime) / 1000;
-            logger.info(`[Recorder] 视频启动时间戳: ${new Date(this._videoStartTime).toISOString()}`);
-            logger.info(`[Recorder] 音频启动时间戳: ${new Date(this._audioStartTime).toISOString()}`);
-            logger.info(`[Recorder] 音视频偏移量: ${offset.toFixed(3)}秒`);
-          }
-
-          // 如果有有效音频文件，合并视频和音频
-          if (this._audioTempFile && this._videoTempFile && audioFileValid) {
-            logger.info('[Recorder] 音频录制成功，尝试合并视频和音频...');
-            this._mergeProgress = 0;
-            const merged = await this._mergeVideoAndAudio();
-            this._mergeProgress = 100;
-            mergeResult = merged;
-            if (!merged) {
-              // 合并失败，将视频临时文件重命名为最终输出
-              try {
-                if (fs.existsSync(this._videoTempFile)) {
-                  fs.renameSync(this._videoTempFile, this.outputFile);
-                  logger.info('[Recorder] 合并失败，已保留纯视频文件（无音频）');
-                }
-              } catch (e) {
-                logger.warn(`[Recorder] 重命名视频文件失败: ${e.message}`);
-              }
-            }
-            // 清理临时文件
-            try {
-              if (this._videoTempFile && fs.existsSync(this._videoTempFile)) fs.unlinkSync(this._videoTempFile);
-              if (this._audioTempFile && fs.existsSync(this._audioTempFile)) fs.unlinkSync(this._audioTempFile);
-            } catch (e) { /* ignore */ }
-            this._audioTempFile = null;
-            this._videoTempFile = null;
-          } else if (this._videoTempFile) {
-            // 没有音频或音频失败，直接将视频临时文件重命名为最终输出
-            try {
-              if (fs.existsSync(this._videoTempFile)) {
-                fs.renameSync(this._videoTempFile, this.outputFile);
-                logger.info('[Recorder] 无有效音频，已保留纯视频文件');
-              }
-            } catch (e) {
-              logger.warn(`[Recorder] 重命名视频文件失败: ${e.message}`);
-            }
-            // 清理音频临时文件
-            try {
-              if (this._audioTempFile && fs.existsSync(this._audioTempFile)) fs.unlinkSync(this._audioTempFile);
-            } catch (e) { /* ignore */ }
-            this._audioTempFile = null;
-            this._videoTempFile = null;
-          }
-
-          // 保存录制结果供UI显示
+          const fileSize = this._getFileSize();
+          
+          // 方案A：单FFmpeg进程直接输出带音频的视频，无需合并
           this._lastRecordingResult = {
-            hasAudio: audioFileValid,
-            mergeResult: mergeResult, // true=合并成功, false=合并失败, null=无音频
+            hasAudio: this.hasAudio,
+            merged: true,
+            saved: true,
             outputFile: this.outputFile,
             timestamp: Date.now()
           };
 
-          const fileSize = this._getFileSize();
-          
           this.onStatusChange('stopped', {
             roomId: this.roomId,
             streamerName: this.streamerName,
@@ -1538,8 +1254,8 @@ class Recorder {
             fileSize: fileSize,
             duration: Date.now() - (this.startTime ? this.startTime.getTime() : Date.now()),
             frameCount: this.frameCount,
-            hasAudio: this._audioCaptureSuccess || false,
-            mergeResult: mergeResult
+            hasAudio: this.hasAudio,
+            merged: true
           });
           resolve();
         };
@@ -1579,7 +1295,7 @@ class Recorder {
       this._captureInterval = null;
     }
 
-    // 强制终止视频 FFmpeg 进程
+    // 强制终止 FFmpeg 进程（方案A：单进程，无音频进程）
     if (this.ffmpegProcess) {
       try {
         if (process.platform === 'win32') {
@@ -1590,19 +1306,6 @@ class Recorder {
         }
       } catch (e) { /* ignore */ }
       this.ffmpegProcess = null;
-    }
-
-    // 强制终止音频 FFmpeg 进程
-    if (this._audioProcess) {
-      try {
-        if (process.platform === 'win32') {
-          const { execSync } = require('child_process');
-          execSync(`taskkill /pid ${this._audioProcess.pid} /f /t 2>nul`, { stdio: 'ignore' });
-        } else if (!this._audioProcess.killed) {
-          this._audioProcess.kill('SIGKILL');
-        }
-      } catch (e) { /* ignore */ }
-      this._audioProcess = null;
     }
 
     // 等待进程完全退出
@@ -1637,8 +1340,6 @@ class Recorder {
       frameCount: this.frameCount,
       startTime: this.startTime,
       hasAudio: this.hasAudio,
-      audioCaptureSuccess: this._audioCaptureSuccess || false,
-      mergeProgress: this._mergeProgress || 0,
       lastRecordingResult: this._lastRecordingResult || null,
       duration: this.startTime ? Date.now() - this.startTime.getTime() : 0
     };
