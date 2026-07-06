@@ -954,6 +954,7 @@ class Recorder {
     // 如果有直播流URL，先添加音频输入（作为第一个输入）
     if (streamUrl) {
       args.push(
+        '-thread_queue_size', '512',  // 增加线程队列大小，避免阻塞警告
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '5',
@@ -963,9 +964,9 @@ class Recorder {
     }
 
     // 视频输入（从管道读取原始帧）- 作为第二个输入
-    // 使用 wallclock 时间戳，根据实际帧到达时间自适应
+    // 使用固定帧率时间戳，与音频时间基准对齐
     args.push(
-      '-use_wallclock_as_timestamps', '1',
+      '-thread_queue_size', '512',  // 增加线程队列大小，避免阻塞警告
       '-f', 'rawvideo',
       '-pix_fmt', 'bgra',
       '-s', `${captureWidth}x${captureHeight}`,
