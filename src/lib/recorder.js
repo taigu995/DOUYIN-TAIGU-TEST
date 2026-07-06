@@ -828,6 +828,7 @@ class Recorder {
       ];
 
       logger.info(`[Recorder] 启动音频捕获 FFmpeg: ${streamInfo.url.substring(0, 80)}...`);
+      this._audioStartTime = Date.now(); // 记录音频启动时间戳
 
       this._audioProcess = spawn(ffmpegPath, args, {
         windowsHide: true
@@ -892,9 +893,27 @@ class Recorder {
 
     try {
       const ffmpegPath = getFFmpegPath();
+      
+      // 计算音视频时间戳偏移（单位：秒）
+      // 正值表示音频比视频晚启动，负值表示音频比视频早启动
+      let audioOffset = 0;
+      if (this._audioStartTime && this._videoStartTime) {
+        audioOffset = (this._audioStartTime - this._videoStartTime) / 1000;
+        logger.info(`[Recorder] 音视频时间戳偏移: ${audioOffset.toFixed(3)}秒 (音频${audioOffset > 0 ? '晚' : '早'}于视频)`);
+      }
+      
       const args = [
         '-y',
         '-i', this._videoTempFile,
+      ];
+      
+      // 如果音频比视频晚启动，需要对音频应用负偏移（让音频延迟播放）
+      // 如果音频比视频早启动，需要对音频应用正偏移（让音频提前播放）
+      if (audioOffset !== 0) {
+        args.push('-itsoffset', audioOffset.toFixed(3));
+      }
+      
+      args.push(
         '-f', 'aac',             // 指定音频输入格式为 ADTS AAC
         '-i', this._audioTempFile,
         '-c:v', 'copy',           // 视频直接复制（不重新编码）
@@ -904,7 +923,7 @@ class Recorder {
         '-shortest',              // 以最短的流为准
         '-movflags', '+faststart',
         this.outputFile
-      ];
+      );
 
       logger.info('[Recorder] 正在合并视频和音频...');
       if (this.onMergeProgress) {
@@ -1057,6 +1076,7 @@ class Recorder {
 
       // 启动视频录制（离屏渲染 + FFmpeg 编码）
       logger.info(`[Recorder] 启动 FFmpeg 视频进程, FPS: ${config.fps || 30}`);
+      this._videoStartTime = Date.now(); // 记录视频启动时间戳
       this.startFFmpegProcess(config.fps || 30);
       this.startCapture();
 
@@ -1426,6 +1446,14 @@ class Recorder {
           }
 
           let mergeResult = null; // null = 无音频, true = 合并成功, false = 合并失败
+
+          // 记录音视频时间戳信息
+          if (this._videoStartTime && this._audioStartTime) {
+            const offset = (this._audioStartTime - this._videoStartTime) / 1000;
+            logger.info(`[Recorder] 视频启动时间戳: ${new Date(this._videoStartTime).toISOString()}`);
+            logger.info(`[Recorder] 音频启动时间戳: ${new Date(this._audioStartTime).toISOString()}`);
+            logger.info(`[Recorder] 音视频偏移量: ${offset.toFixed(3)}秒`);
+          }
 
           // 如果有有效音频文件，合并视频和音频
           if (this._audioTempFile && this._videoTempFile && audioFileValid) {
