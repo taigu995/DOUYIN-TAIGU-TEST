@@ -902,16 +902,12 @@ class Recorder {
         this.recording = true;
       }
       
-      // 设置录制开始时间（FFmpeg启动后）
-      this.startTime = now;
-
       logger.info(`[Recorder] 录制已开始: ${this.streamerName} -> ${this.outputFile}`);
 
       this.onStatusChange('recording', {
         roomId: this.roomId,
         streamerName: this.streamerName,
         outputFile: this.outputFile,
-        startTime: this.startTime,
         hasAudio: this.hasAudio,
         isStreamMode: this._isStreamMode
       });
@@ -1138,6 +1134,10 @@ class Recorder {
           try {
             // 检查 stdin 是否可写（防止 write after end 错误）
             if (this.ffmpegProcess.stdin.writable) {
+              // 如果是第一帧，设置录制开始时间
+              if (this.frameCount === 0) {
+                this.startTime = new Date();
+              }
               // 如果有缓冲帧，先写入缓冲帧
               if (this._frameBuffer && this._frameBuffer.length > 0) {
                 for (const bufferedFrame of this._frameBuffer) {
