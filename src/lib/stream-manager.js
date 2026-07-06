@@ -869,7 +869,7 @@ class StreamManager {
   /**
    * 销毁所有资源
    */
-  destroyAll() {
+  async destroyAll() {
     for (const [roomId, state] of this.streams) {
       // 停止监控定时器
       if (state.timer) {
@@ -878,7 +878,9 @@ class StreamManager {
       }
       // 强制销毁录制器（终止FFmpeg进程）
       if (state.recorder) {
-        try { state.recorder.destroy(); } catch (e) { /* ignore */ }
+        try { 
+          await state.recorder.destroy(); 
+        } catch (e) { /* ignore */ }
         state.recorder = null;
       }
       // 销毁监控窗口

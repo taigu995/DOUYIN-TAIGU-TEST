@@ -585,7 +585,10 @@ app.on('second-instance', () => {
 });
 
 // 退出前清理
-app.on('before-quit', async () => {
+app.on('before-quit', async (event) => {
+  // 阻止默认退出行为，等待清理完成
+  event.preventDefault();
+  
   if (streamManager) {
     await streamManager.destroyAll();
   }
@@ -596,6 +599,12 @@ app.on('before-quit', async () => {
       execSync('taskkill /F /IM ffmpeg.exe /T 2>nul', { stdio: 'ignore' });
     }
   } catch (e) { /* 忽略 */ }
+  
+  // 等待一小段时间确保所有进程已终止
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  // 强制退出
+  app.exit(0);
 });
 
 app.on('window-all-closed', () => {

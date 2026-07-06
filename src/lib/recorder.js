@@ -810,7 +810,7 @@ class Recorder {
     try {
       const ffmpegPath = getFFmpegPath();
       // 音频临时文件（录制结束后会合并到最终文件并删除）
-      this._audioTempFile = this.outputFile.replace(/\.mp4$/, '_audio.m4a');
+      this._audioTempFile = this.outputFile.replace(/\.mp4$/, '_audio.aac');
       this._videoTempFile = this.outputFile.replace(/\.mp4$/, '_video.mp4');
       this._audioCaptureSuccess = false; // 标记音频是否成功录制
 
@@ -821,8 +821,9 @@ class Recorder {
         '-reconnect_delay_max', '5',
         '-i', streamInfo.url,
         '-vn',                    // 不要视频
-        '-c:a', 'copy',           // 音频直接复制（不重新编码，避免旧版FFmpeg兼容问题）
+        '-c:a', 'aac',            // 音频编码 AAC
         '-b:a', '192k',           // 音频比特率
+        '-f', 'adts',             // 输出 ADTS AAC 格式（无需 moov atom，更稳定）
         this._audioTempFile
       ];
 
@@ -894,9 +895,10 @@ class Recorder {
       const args = [
         '-y',
         '-i', this._videoTempFile,
+        '-f', 'aac',             // 指定音频输入格式为 ADTS AAC
         '-i', this._audioTempFile,
         '-c:v', 'copy',           // 视频直接复制（不重新编码）
-        '-c:a', 'aac',            // 音频编码 AAC
+        '-c:a', 'copy',           // 音频直接复制（不重新编码，兼容性更好）
         '-map', '0:v:0',          // 从第一个输入取视频
         '-map', '1:a:0',          // 从第二个输入取音频
         '-shortest',              // 以最短的流为准
@@ -1510,8 +1512,12 @@ class Recorder {
   /**
    * 销毁录制器，强制终止所有进程
    */
-  destroy() {
+  async destroy() {
     // 停止帧捕获
+    if (this._captureTimer) {
+      clearTimeout(this._captureTimer);
+      this._captureTimer = null;
+    }
     if (this._captureInterval) {
       clearInterval(this._captureInterval);
       this._captureInterval = null;
@@ -1520,7 +1526,10 @@ class Recorder {
     // 强制终止视频 FFmpeg 进程
     if (this.ffmpegProcess) {
       try {
-        if (!this.ffmpegProcess.killed) {
+        if (process.platform === 'win32') {
+          const { execSync } = require('child_process');
+          execSync(`taskkill /pid ${this.ffmpegProcess.pid} /f /t 2>nul`, { stdio: 'ignore' });
+        } else if (!this.ffmpegProcess.killed) {
           this.ffmpegProcess.kill('SIGKILL');
         }
       } catch (e) { /* ignore */ }
@@ -1530,12 +1539,18 @@ class Recorder {
     // 强制终止音频 FFmpeg 进程
     if (this._audioProcess) {
       try {
-        if (!this._audioProcess.killed) {
+        if (process.platform === 'win32') {
+          const { execSync } = require('child_process');
+          execSync(`taskkill /pid ${this._audioProcess.pid} /f /t 2>nul`, { stdio: 'ignore' });
+        } else if (!this._audioProcess.killed) {
           this._audioProcess.kill('SIGKILL');
         }
       } catch (e) { /* ignore */ }
       this._audioProcess = null;
     }
+
+    // 等待进程完全退出
+    await new Promise(r => setTimeout(r, 500));
 
     // 销毁捕获窗口
     if (this.captureWindow && !this.captureWindow.isDestroyed()) {
