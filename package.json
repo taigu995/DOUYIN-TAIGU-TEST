@@ -37,7 +37,7 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "build/icon.jpeg",
+      "icon": "build/icon.png",
       "signAndEditExecutable": false
     },
     "nsis": {

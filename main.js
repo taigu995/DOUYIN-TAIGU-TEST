@@ -35,7 +35,7 @@ if (!gotTheLock) {
  * 创建主窗口
  */
 function createMainWindow() {
-  const iconPath = path.join(__dirname, 'build', 'icon.jpeg');
+  const iconPath = path.join(__dirname, 'build', 'icon.png');
   mainWindow = new BrowserWindow({
     width: 900,
     height: 700,
