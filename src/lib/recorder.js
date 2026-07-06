@@ -81,8 +81,8 @@ class Recorder {
     const config = getConfig();
 
     // 固定捕获分辨率为 1280x720 (16:9) - 平衡画质与捕获速度
-    const CAPTURE_WIDTH = 1920;
-    const CAPTURE_HEIGHT = 1080;
+    const CAPTURE_WIDTH = 1280;
+    const CAPTURE_HEIGHT = 720;
 
     this.captureWindow = new BrowserWindow({
       width: CAPTURE_WIDTH,
@@ -121,8 +121,7 @@ class Recorder {
     // 设置最高画质
     await this.setMaxQuality();
 
-    // 关闭弹幕显示
-    await this.hideDanmaku();
+    // 保留弹幕显示（录制时需要捕获弹幕画面）
 
     // 注入 CSS 防止页面滚动，确保捕获区域固定
     await this.injectNoScrollCSS();
@@ -828,7 +827,7 @@ class Recorder {
         '-reconnect_delay_max', '5',
         '-i', streamInfo.url,
         '-vn',                    // 不要视频
-        '-c:a', 'aac',            // 音频编码 AAC
+        '-c:a', 'copy',           // 音频直接复制（不重新编码，避免旧版FFmpeg兼容问题）
         '-b:a', '192k',           // 音频比特率
         this._audioTempFile
       ];
@@ -918,18 +917,17 @@ class Recorder {
 
       return new Promise((resolve) => {
         const mergeProcess = spawn(ffmpegPath, args, { windowsHide: true });
-        let lastProgress = 0;
+        let mergeStderr = '';
 
         mergeProcess.stderr.on('data', (data) => {
           const msg = data.toString();
+          mergeStderr += msg;
           // 解析合并进度
           const timeMatch = msg.match(/time=(\d+):(\d+):(\d+)\.(\d+)/);
           if (timeMatch && this.onMergeProgress) {
-            // 简单进度估算（基于时间）
             const totalSec = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3]);
-            if (totalSec > lastProgress) {
-              lastProgress = totalSec;
-              this.onMergeProgress(Math.min(totalSec * 10, 90)); // 估算进度
+            if (totalSec > 0) {
+              this.onMergeProgress(Math.min(totalSec * 10, 90));
             }
           }
         });
@@ -941,14 +939,17 @@ class Recorder {
             // 删除临时文件
             try { fs.unlinkSync(this._videoTempFile); } catch (e) { /* ignore */ }
             try { fs.unlinkSync(this._audioTempFile); } catch (e) { /* ignore */ }
+            this._lastRecordingResult = { hasAudio: true, merged: true, saved: true };
             resolve(true);
           } else {
             logger.warn(`[Recorder] 合并失败 (code: ${code})，保留纯视频文件`);
+            logger.warn(`[Recorder] 合并错误详情: ${mergeStderr.slice(-500)}`);
             // 合并失败时，将视频文件重命名为最终文件
             try {
               fs.renameSync(this._videoTempFile, this.outputFile);
-              fs.unlinkSync(this._audioTempFile);
+              try { fs.unlinkSync(this._audioTempFile); } catch (e) { /* ignore */ }
             } catch (e) { /* ignore */ }
+            this._lastRecordingResult = { hasAudio: true, merged: false, saved: true };
             resolve(false);
           }
         });
@@ -958,6 +959,7 @@ class Recorder {
           try {
             fs.renameSync(this._videoTempFile, this.outputFile);
           } catch (e) { /* ignore */ }
+          this._lastRecordingResult = { hasAudio: true, merged: false, saved: true };
           resolve(false);
         });
       });
@@ -966,6 +968,7 @@ class Recorder {
       try {
         fs.renameSync(this._videoTempFile, this.outputFile);
       } catch (e2) { /* ignore */ }
+      this._lastRecordingResult = { hasAudio: true, merged: false, saved: true };
       return false;
     }
   }
