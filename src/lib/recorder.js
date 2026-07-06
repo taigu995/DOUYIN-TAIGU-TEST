@@ -80,7 +80,7 @@ class Recorder {
   async createCaptureWindow() {
     const config = getConfig();
 
-    // 固定捕获分辨率为 1920x1080 (16:9)
+    // 固定捕获分辨率为 1280x720 (16:9) - 平衡画质与捕获速度
     const CAPTURE_WIDTH = 1920;
     const CAPTURE_HEIGHT = 1080;
 
@@ -1072,9 +1072,9 @@ class Recorder {
       logger.error(`[Recorder] 启动录制失败: ${err.message}`, err);
       // 彻底清理状态
       this.recording = false;
-      if (this._captureInterval) {
-        clearInterval(this._captureInterval);
-        this._captureInterval = null;
+      if (this._captureTimer) {
+        clearTimeout(this._captureTimer);
+        this._captureTimer = null;
       }
       if (this.ffmpegProcess) {
         try { this.ffmpegProcess.kill('SIGKILL'); } catch (e) { /* ignore */ }
@@ -1104,11 +1104,15 @@ class Recorder {
     // 同步检测音频设备（避免异步导致FFmpeg进程延迟启动）
     const audioDevice = this._detectAudioDeviceSync();
     
+    // 捕获分辨率与FFmpeg输入尺寸匹配（1280x720 以提高捕获速度）
+    const captureWidth = 1280;
+    const captureHeight = 720;
+    
     const args = [
       // 视频输入（从管道读取原始帧）
       '-f', 'rawvideo',
       '-pix_fmt', 'bgra',
-      '-s', '1920x1080',
+      '-s', `${captureWidth}x${captureHeight}`,
       '-r', String(fps),
       '-i', 'pipe:0',
     ];
@@ -1198,23 +1202,40 @@ class Recorder {
 
   /**
    * 开始帧捕获循环
+   * 使用自适应捕获策略：根据实际捕获能力动态调整，避免帧堆积
    */
   startCapture() {
     if (!this.captureWindow || this.captureWindow.isDestroyed()) return;
 
     const config = getConfig();
-    const fps = config.fps || 30;
-    const interval = Math.floor(1000 / fps);
-    const CAPTURE_WIDTH = 1920;
-    const CAPTURE_HEIGHT = 1080;
+    const targetFps = config.fps || 30;
+    // 捕获分辨率：使用1280x720以提高捕获速度，FFmpeg编码时保持原始尺寸
+    const CAPTURE_WIDTH = 1280;
+    const CAPTURE_HEIGHT = 720;
+    const targetInterval = Math.floor(1000 / targetFps);
 
-    this._captureInterval = setInterval(async () => {
+    let lastCaptureTime = 0;
+    let capturing = false;
+
+    const captureFrame = async () => {
       if (!this.recording || !this.captureWindow || this.captureWindow.isDestroyed()) {
         return;
       }
 
+      // 防止重入：如果上一次捕获还没完成，跳过这次
+      if (capturing) {
+        // 安排下一次捕获
+        if (this.recording) {
+          this._captureTimer = setTimeout(captureFrame, targetInterval);
+        }
+        return;
+      }
+
+      capturing = true;
+      const now = Date.now();
+
       try {
-        // 使用 capturePage 的 rect 参数，严格只捕获视口区域 (0,0,1920,1080)
+        // 使用 capturePage 的 rect 参数，严格只捕获视口区域
         const image = await this.captureWindow.webContents.capturePage({
           x: 0,
           y: 0,
@@ -1272,8 +1293,22 @@ class Recorder {
         if (err.message && !err.message.includes('destroyed')) {
           logger.error('Frame capture error:', err.message);
         }
+      } finally {
+        capturing = false;
       }
-    }, interval);
+
+      // 计算下一次捕获的延迟，确保稳定的帧率
+      const elapsed = Date.now() - now;
+      const nextDelay = Math.max(0, targetInterval - elapsed);
+      
+      // 安排下一次捕获
+      if (this.recording) {
+        this._captureTimer = setTimeout(captureFrame, nextDelay);
+      }
+    };
+
+    // 启动捕获循环
+    this._captureTimer = setTimeout(captureFrame, targetInterval);
   }
 
   /**
@@ -1368,13 +1403,32 @@ class Recorder {
 
           // 等待音频进程完全退出并写入文件
           if (this._audioProcess) {
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 1500));
+          }
+
+          // 直接检查音频文件是否有效（不依赖异步标记）
+          let audioFileValid = false;
+          if (this._audioTempFile && fs.existsSync(this._audioTempFile)) {
+            try {
+              const audioStat = fs.statSync(this._audioTempFile);
+              audioFileValid = audioStat.size > 1024; // 大于1KB认为有效
+              if (audioFileValid) {
+                logger.info(`[Recorder] 检测到有效音频文件, 大小: ${(audioStat.size / 1024).toFixed(1)}KB`);
+                this._audioCaptureSuccess = true;
+              } else {
+                logger.warn(`[Recorder] 音频文件过小 (${audioStat.size} bytes)，跳过合并`);
+              }
+            } catch (e) {
+              logger.warn(`[Recorder] 无法读取音频文件: ${e.message}`);
+            }
+          } else {
+            logger.info('[Recorder] 无音频临时文件');
           }
 
           let mergeResult = null; // null = 无音频, true = 合并成功, false = 合并失败
 
-          // 如果有音频文件且音频录制成功，合并视频和音频
-          if (this._audioTempFile && this._videoTempFile && this._audioCaptureSuccess) {
+          // 如果有有效音频文件，合并视频和音频
+          if (this._audioTempFile && this._videoTempFile && audioFileValid) {
             logger.info('[Recorder] 音频录制成功，尝试合并视频和音频...');
             this._mergeProgress = 0;
             const merged = await this._mergeVideoAndAudio();
@@ -1418,7 +1472,7 @@ class Recorder {
 
           // 保存录制结果供UI显示
           this._lastRecordingResult = {
-            hasAudio: this._audioCaptureSuccess || false,
+            hasAudio: audioFileValid,
             mergeResult: mergeResult, // true=合并成功, false=合并失败, null=无音频
             outputFile: this.outputFile,
             timestamp: Date.now()
