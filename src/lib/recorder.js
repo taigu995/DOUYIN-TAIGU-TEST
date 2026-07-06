@@ -1022,8 +1022,7 @@ class Recorder {
     // 如果有直播流URL，先添加音频输入（作为第一个输入）
     if (streamUrl) {
       args.push(
-        '-thread_queue_size', '512',  // 增加线程队列大小，避免阻塞警告
-        '-fflags', '+genpts',  // 为音频流生成新的时间戳，从0开始
+        '-thread_queue_size', '512',
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '5',
@@ -1033,10 +1032,8 @@ class Recorder {
     }
 
     // 视频输入（从管道读取原始帧）- 作为第二个输入
-    // 使用固定帧率时间戳，与音频时间基准对齐
     args.push(
-      '-thread_queue_size', '512',  // 增加线程队列大小，避免阻塞警告
-      '-fflags', '+genpts',  // 为视频流生成新的时间戳，从0开始
+      '-thread_queue_size', '512',
       '-f', 'rawvideo',
       '-pix_fmt', 'bgra',
       '-s', `${captureWidth}x${captureHeight}`,
@@ -1050,7 +1047,6 @@ class Recorder {
       '-preset', 'medium',
       '-crf', '15',
       '-pix_fmt', 'yuv420p',
-      '-vsync', 'vfr',  // 可变帧率模式，根据实际输入自适应
     );
 
     // 如果有音频，添加音频编码和映射
@@ -1060,7 +1056,11 @@ class Recorder {
         '-map', '1:v',     // 第二个输入(pipe)的视频
         '-c:a', 'aac',
         '-b:a', '192k',
-        '-async', '1',     // 音频同步
+        // 关键：重置两路流的时间戳，消除FLV流的巨大起始时间偏移
+        // FLV直播流的start时间可能是数万秒（如22869s），而pipe视频从0开始
+        // 使用滤镜将两路流的PTS都重置为从0开始，确保音视频对齐
+        '-filter:v', 'setpts=PTS-STARTPTS',
+        '-filter:a', 'asetpts=PTS-STARTPTS',
         '-shortest',       // 以最短的流为准
       );
     }
