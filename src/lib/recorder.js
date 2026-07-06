@@ -951,22 +951,40 @@ class Recorder {
         logger.info('[Recorder] 使用方案A：单FFmpeg进程同时处理视频和音频');
         this.hasAudio = true;
         
-        // 先开始捕获帧，缓冲几帧后再启动FFmpeg，确保音视频同时开始
-        this.recording = true;
-        this.startCapture();
-        
-        // 等待几帧缓冲（约100ms）
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // 启动单FFmpeg进程（视频+音频）
+        // 先启动FFmpeg进程，让它连接到FLV流并就绪
         logger.info(`[Recorder] 启动 FFmpeg 进程 (视频+音频), FPS: ${streamFps}`);
         this._streamUrl = streamInfo.url;
         this.startFFmpegProcess(streamFps, streamInfo.url);
+        
+        // 等待FFmpeg初始化完成（stdin可写），再开始捕获
+        // 这样音频和视频几乎同时开始，减少启动时差
+        await new Promise(resolve => {
+          const check = () => {
+            if (this.ffmpegProcess && this.ffmpegProcess.stdin && this.ffmpegProcess.stdin.writable) {
+              resolve();
+            } else if (this.recording) {
+              setTimeout(check, 50);
+            } else {
+              resolve(); // 录制已被取消
+            }
+          };
+          // 最多等待3秒
+          const timeout = setTimeout(() => {
+            logger.warn('[Recorder] 等待FFmpeg就绪超时，强制开始捕获');
+            resolve();
+          }, 3000);
+          check().then(() => clearTimeout(timeout));
+        });
+        
+        // FFmpeg就绪后，开始捕获视频帧
+        this.recording = true;
+        this.startCapture(streamFps);
+        logger.info('[Recorder] FFmpeg就绪，开始捕获视频帧');
       } else {
         logger.warn('[Recorder] 未能提取直播流URL，仅录制视频（无音频）');
         this.hasAudio = false;
         this.startFFmpegProcess(streamFps, null);
-        this.startCapture();
+        this.startCapture(streamFps);
         this.recording = true;
       }
       
@@ -1023,6 +1041,8 @@ class Recorder {
     if (streamUrl) {
       args.push(
         '-thread_queue_size', '512',
+        '-analyzeduration', '100000',  // 减少分析时间（0.1秒），加快初始化
+        '-probesize', '100000',        // 减少探测大小（100KB），加快初始化
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '5',
@@ -1051,18 +1071,26 @@ class Recorder {
 
     // 如果有音频，添加音频编码和映射
     if (streamUrl) {
+      // 音频延迟补偿值（秒）
+      // 页面播放器渲染视频有额外延迟（缓冲+解码），而我们直接从FLV流提取音频
+      // 这导致音频比视频"超前"，需要给音频加延迟来补偿
+      const audioDelaySec = 1.5;
+      
       args.push(
         '-map', '0:a',     // 第一个输入(直播流)的音频
         '-map', '1:v',     // 第二个输入(pipe)的视频
         '-c:a', 'aac',
         '-b:a', '192k',
-        // 关键：重置两路流的时间戳，消除FLV流的巨大起始时间偏移
-        // FLV直播流的start时间可能是数万秒（如22869s），而pipe视频从0开始
-        // 使用滤镜将两路流的PTS都重置为从0开始，确保音视频对齐
+        // 重置时间戳并补偿延迟：
+        // 1. asetpts=PTS-STARTPTS: 消除FLV流的巨大起始时间偏移（如730s）
+        // 2. +audioDelaySec/TB: 给音频添加延迟，补偿页面播放器的额外缓冲
+        //    视频来自页面渲染（有播放器缓冲延迟），音频来自FLV直提取（低延迟）
+        //    所以音频比视频超前，需要延迟音频来对齐
         '-filter:v', 'setpts=PTS-STARTPTS',
-        '-filter:a', 'asetpts=PTS-STARTPTS',
+        '-filter:a', `asetpts=PTS-STARTPTS+${audioDelaySec}/TB`,
         '-shortest',       // 以最短的流为准
       );
+      logger.info(`[Recorder] 音频延迟补偿: ${audioDelaySec}s（补偿页面播放器缓冲延迟）`);
     }
 
     args.push(
@@ -1137,12 +1165,10 @@ class Recorder {
    * 开始帧捕获循环
    * 使用自适应捕获策略：根据实际捕获能力动态调整，避免帧堆积
    */
-  startCapture() {
+  startCapture(targetFps = 30) {
     if (!this.captureWindow || this.captureWindow.isDestroyed()) return;
 
-    const config = getConfig();
-    const targetFps = config.fps || 30;
-    // 捕获分辨率：降低到1280x720以提高捕获速度，确保达到30fps
+    // 捕获分辨率：降低到1280x720以提高捕获速度
     const CAPTURE_WIDTH = 1280;
     const CAPTURE_HEIGHT = 720;
     const targetInterval = Math.floor(1000 / targetFps);
