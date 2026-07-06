@@ -830,6 +830,7 @@ class Recorder {
 
       logger.info(`[Recorder] 启动音频捕获 FFmpeg: ${streamInfo.url.substring(0, 80)}...`);
 
+      const { spawn } = require('child_process');
       this._audioProcess = spawn(ffmpegPath, args, {
         windowsHide: true
       });
@@ -1308,8 +1309,23 @@ class Recorder {
 
           // 如果有音频文件，合并视频和音频
           if (this._audioTempFile && this._videoTempFile) {
-            await this._mergeVideoAndAudio();
-            // 清理临时文件引用
+            const merged = await this._mergeVideoAndAudio();
+            if (!merged) {
+              // 合并失败，将视频临时文件重命名为最终输出
+              try {
+                if (fs.existsSync(this._videoTempFile)) {
+                  fs.renameSync(this._videoTempFile, this.outputFile);
+                  logger.info('[Recorder] 合并失败，已保留纯视频文件（无音频）');
+                }
+              } catch (e) {
+                logger.warn(`[Recorder] 重命名视频文件失败: ${e.message}`);
+              }
+            }
+            // 清理临时文件
+            try {
+              if (this._videoTempFile && fs.existsSync(this._videoTempFile)) fs.unlinkSync(this._videoTempFile);
+              if (this._audioTempFile && fs.existsSync(this._audioTempFile)) fs.unlinkSync(this._audioTempFile);
+            } catch (e) { /* ignore */ }
             this._audioTempFile = null;
             this._videoTempFile = null;
           }
