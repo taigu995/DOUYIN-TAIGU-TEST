@@ -1118,7 +1118,7 @@ class Recorder {
       this._captureInterval = null;
     }
 
-    // 流模式：直接发送 SIGINT 让 FFmpeg 优雅退出并正确写入文件头
+    // 流模式：通过 stdin 发送 'q' 让 FFmpeg 优雅退出（Windows 兼容）
     if (this._isStreamMode && this.ffmpegProcess) {
       return new Promise((resolve) => {
         let resolved = false;
@@ -1139,10 +1139,25 @@ class Recorder {
           resolve();
         };
         
-        // 发送 SIGINT 让 FFmpeg 优雅退出（正确写入文件头）
+        // Windows: 通过 stdin 发送 'q' 让 FFmpeg 优雅退出
+        // 其他平台: 使用 SIGINT
         try {
-          this.ffmpegProcess.kill('SIGINT');
-        } catch (e) { /* ignore */ }
+          if (process.platform === 'win32') {
+            // Windows 上 SIGINT 等同于 TerminateProcess，必须用 stdin 'q'
+            if (this.ffmpegProcess.stdin && !this.ffmpegProcess.stdin.destroyed) {
+              this.ffmpegProcess.stdin.write('q\n');
+              this.ffmpegProcess.stdin.end();
+            } else {
+              // stdin 不可用时用 taskkill 发送 WM_CLOSE
+              const { exec } = require('child_process');
+              exec(`taskkill /PID ${this.ffmpegProcess.pid} /T`);
+            }
+          } else {
+            this.ffmpegProcess.kill('SIGINT');
+          }
+        } catch (e) {
+          try { this.ffmpegProcess.kill('SIGINT'); } catch (e2) { /* ignore */ }
+        }
         
         this.ffmpegProcess.on('close', done);
 
@@ -1152,7 +1167,7 @@ class Recorder {
             try { this.ffmpegProcess.kill('SIGKILL'); } catch (e) { /* ignore */ }
           }
           done();
-        }, 10000);
+        }, 15000);
       });
     }
 
