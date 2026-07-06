@@ -475,14 +475,19 @@ class Recorder {
    * 优先使用API方式，回退到DOM解析
    */
   async extractStreamUrl() {
+    // 方法1: 通过抖音API获取直播流URL（最可靠）
     try {
-      // 方法1: 通过抖音API获取直播流URL（最可靠）
       const apiUrl = `https://live.douyin.com/webcast/room/web/enter/?aid=6383&live_id=1&device_platform=web&language=zh-CN&enter_from=web_live&cookie_enabled=true&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=120.0.0.0&web_rid=${this.roomId}`;
       
       logger.info(`[Recorder] 尝试通过API获取直播流URL, roomId: ${this.roomId}`);
       
       // 获取session cookies
-      const cookies = await this._getSessionCookies('live.douyin.com');
+      let cookies = '';
+      try {
+        cookies = await this._getSessionCookies('live.douyin.com');
+      } catch (cookieErr) {
+        logger.warn(`[Recorder] 获取cookies失败: ${cookieErr.message}`);
+      }
       const headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': `https://live.douyin.com/${this.roomId}`,
@@ -575,8 +580,62 @@ class Recorder {
       } else {
         logger.warn(`[Recorder] API请求失败: ${apiResult.error || '未知错误'}, raw: ${(apiResult.raw || '').substring(0, 100)}`);
       }
+    } catch (apiErr) {
+      logger.warn(`[Recorder] API方式获取直播流失败: ${apiErr.message}`);
+    }
 
-      // 方法2: 从页面DOM中提取（回退方案）
+    // 方法1.5: 通过页面上下文fetch API获取（自动携带cookies）
+    try {
+      if (this.captureWindow && !this.captureWindow.isDestroyed()) {
+        logger.info('[Recorder] 尝试通过页面fetch获取直播流URL...');
+        const fetchResult = await this.captureWindow.webContents.executeJavaScript(`
+          (async () => {
+            try {
+              const resp = await fetch('/webcast/room/web/enter/?aid=6383&live_id=1&device_platform=web&language=zh-CN&enter_from=web_live&cookie_enabled=true&web_rid=${this.roomId}', {
+                credentials: 'include',
+                headers: { 'Accept': 'application/json' }
+              });
+              const json = await resp.json();
+              const findStreamUrl = (obj, depth) => {
+                if (!obj || typeof obj !== 'object' || depth > 10) return null;
+                if (obj.stream_url && (obj.stream_url.flv_pull_url || obj.stream_url.hls_pull_url_map)) {
+                  return obj.stream_url;
+                }
+                for (const key of Object.keys(obj)) {
+                  const result = findStreamUrl(obj[key], depth + 1);
+                  if (result) return result;
+                }
+                return null;
+              };
+              const roomData = json.data || json;
+              const dataArray = Array.isArray(roomData.data) ? roomData.data : [roomData];
+              for (const item of dataArray) {
+                const streamUrl = findStreamUrl(item);
+                if (streamUrl) {
+                  const flvUrl = streamUrl.flv_pull_url && Object.values(streamUrl.flv_pull_url)[0];
+                  const hlsUrl = streamUrl.hls_pull_url_map && Object.values(streamUrl.hls_pull_url_map)[0];
+                  return { url: flvUrl || hlsUrl, type: flvUrl ? 'flv' : 'hls', source: 'page_fetch' };
+                }
+              }
+              return null;
+            } catch (e) {
+              return { error: e.message };
+            }
+          })()
+        `);
+        if (fetchResult && fetchResult.url) {
+          logger.info(`[Recorder] 页面fetch获取直播流成功 (来源: ${fetchResult.source}, 类型: ${fetchResult.type})`);
+          return fetchResult;
+        } else if (fetchResult && fetchResult.error) {
+          logger.warn(`[Recorder] 页面fetch获取直播流出错: ${fetchResult.error}`);
+        }
+      }
+    } catch (fetchErr) {
+      logger.warn(`[Recorder] 页面fetch方式失败: ${fetchErr.message}`);
+    }
+
+    // 方法2: 从页面DOM中提取（回退方案）
+    try {
       if (this.captureWindow && !this.captureWindow.isDestroyed()) {
         logger.info('[Recorder] 尝试从页面DOM提取直播流URL...');
         const domResult = await this.captureWindow.webContents.executeJavaScript(`
@@ -660,12 +719,12 @@ class Recorder {
           logger.warn(`[Recorder] DOM提取直播流URL出错: ${domResult.error}`);
         }
       }
-
-      return null;
-    } catch (e) {
-      logger.warn(`[Recorder] 提取直播流URL失败: ${e.message}`);
-      return null;
+    } catch (domErr) {
+      logger.warn(`[Recorder] DOM方式提取直播流失败: ${domErr.message}`);
     }
+
+    logger.warn('[Recorder] 所有方式均未能提取到直播流URL');
+    return null;
   }
 
   /**
@@ -869,100 +928,99 @@ class Recorder {
     const resolvedPath = getFFmpegPath();
     const { spawn } = require('child_process');
 
-    // 先尝试检测可用的音频设备
-    this._detectAudioDevice().then(audioDevice => {
-      const args = [
-        // 视频输入（从管道读取原始帧）
-        '-f', 'rawvideo',
-        '-pix_fmt', 'bgra',
-        '-s', '1920x1080',
-        '-r', String(fps),
-        '-i', 'pipe:0',
-      ];
+    // 同步检测音频设备（避免异步导致FFmpeg进程延迟启动）
+    const audioDevice = this._detectAudioDeviceSync();
+    
+    const args = [
+      // 视频输入（从管道读取原始帧）
+      '-f', 'rawvideo',
+      '-pix_fmt', 'bgra',
+      '-s', '1920x1080',
+      '-r', String(fps),
+      '-i', 'pipe:0',
+    ];
 
-      // 如果检测到音频设备，添加音频输入
-      if (audioDevice) {
-        args.push('-f', 'dshow', '-i', `audio=${audioDevice}`);
-        args.push('-c:a', 'aac', '-b:a', '192k');
-        this.hasAudio = true;
-        logger.info(`[Recorder] 音频设备: ${audioDevice}`);
-      } else {
-        this.hasAudio = false;
-        logger.warn('[Recorder] 未检测到音频设备，仅录制视频（无声音）');
-      }
+    // 如果检测到音频设备，添加音频输入
+    if (audioDevice) {
+      args.push('-f', 'dshow', '-i', `audio=${audioDevice}`);
+      args.push('-c:a', 'aac', '-b:a', '192k');
+      this.hasAudio = true;
+      logger.info(`[Recorder] 音频设备: ${audioDevice}`);
+    } else {
+      this.hasAudio = false;
+      logger.warn('[Recorder] 未检测到音频设备，仅录制视频（无声音）');
+    }
 
-      args.push(
-        '-c:v', 'libx264',
-        '-preset', 'medium',
-        '-crf', '15',
-        '-pix_fmt', 'yuv420p',
-        '-movflags', '+faststart',
-        '-y',
-        this.outputFile
-      );
+    args.push(
+      '-c:v', 'libx264',
+      '-preset', 'medium',
+      '-crf', '15',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      '-y',
+      this.outputFile
+    );
 
-      logger.info(`[Recorder] 启动 FFmpeg: ${resolvedPath}, 输入格式: bgra`);
-      this.ffmpegProcess = spawn(resolvedPath, args, {
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
+    logger.info(`[Recorder] 启动 FFmpeg: ${resolvedPath}, 输入格式: bgra`);
+    this.ffmpegProcess = spawn(resolvedPath, args, {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
 
-      this.ffmpegProcess.stdout.on('data', (data) => {
-        console.log(`[FFmpeg] ${data.toString().trim()}`);
-      });
+    this.ffmpegProcess.stdout.on('data', (data) => {
+      const msg = data.toString().trim();
+      if (msg) logger.info(`[FFmpeg] ${msg}`);
+    });
 
-      this.ffmpegProcess.stderr.on('data', (data) => {
-        const msg = data.toString().trim();
-        if (msg) console.log(`[FFmpeg] ${msg}`);
-      });
+    this.ffmpegProcess.stderr.on('data', (data) => {
+      const msg = data.toString().trim();
+      if (msg) logger.info(`[FFmpeg] ${msg}`);
+    });
 
-      this.ffmpegProcess.on('close', (code) => {
-        console.log(`[FFmpeg] 进程退出, code: ${code}`);
-        this.ffmpegProcess = null;
-      });
+    this.ffmpegProcess.on('close', (code) => {
+      logger.info(`[FFmpeg] 进程退出, code: ${code}`);
+      this.ffmpegProcess = null;
+    });
 
-      this.ffmpegProcess.on('error', (err) => {
-        console.error(`[FFmpeg] 进程错误:`, err);
-        this.onError(this.roomId, err);
-      });
+    this.ffmpegProcess.on('error', (err) => {
+      logger.error(`[FFmpeg] 进程错误:`, err);
+      this.onError(this.roomId, err);
     });
   }
 
   /**
-   * 检测可用的音频捕获设备
+   * 同步检测可用的音频捕获设备
    */
-  _detectAudioDevice() {
-    return new Promise((resolve) => {
-      const resolvedPath = getFFmpegPath();
-      const { execSync } = require('child_process');
-      try {
-        const output = execSync(`"${resolvedPath}" -f dshow -list_devices true -i dummy 2>&1`, {
-          timeout: 5000,
-          encoding: 'utf-8'
-        });
-        // 解析输出，找到第一个音频设备
-        const lines = output.split('\n');
-        let inAudioSection = false;
-        let audioDevice = null;
-        for (const line of lines) {
-          if (line.includes('DirectShow audio devices')) {
-            inAudioSection = true;
-            continue;
-          }
-          if (inAudioSection) {
-            // 匹配形如 "Stereo Mix (Realtek Audio)" 的设备名
-            const match = line.match(/"([^"]+)"/);
-            if (match) {
-              audioDevice = match[1];
-              break;
-            }
+  _detectAudioDeviceSync() {
+    const resolvedPath = getFFmpegPath();
+    const { execSync } = require('child_process');
+    try {
+      const output = execSync(`"${resolvedPath}" -f dshow -list_devices true -i dummy 2>&1`, {
+        timeout: 5000,
+        encoding: 'utf-8'
+      });
+      // 解析输出，找到第一个音频设备
+      const lines = output.split('\n');
+      let inAudioSection = false;
+      let audioDevice = null;
+      for (const line of lines) {
+        if (line.includes('DirectShow audio devices')) {
+          inAudioSection = true;
+          continue;
+        }
+        if (inAudioSection) {
+          // 匹配形如 "Stereo Mix (Realtek Audio)" 的设备名
+          const match = line.match(/"([^"]+)"/);
+          if (match) {
+            audioDevice = match[1];
+            break;
           }
         }
-        resolve(audioDevice);
-      } catch (e) {
-        logger.warn('[Recorder] 检测音频设备失败:', e.message);
-        resolve(null);
       }
-    });
+      return audioDevice;
+    } catch (e) {
+      logger.warn('[Recorder] 检测音频设备失败:', e.message);
+      return null;
+    }
   }
 
   /**
