@@ -959,11 +959,12 @@ class Recorder {
     }
 
     // 视频输入（从管道读取原始帧）- 作为第二个输入
+    // 使用实际帧率模式：不强制指定输入帧率，让FFmpeg根据实际数据自适应
     args.push(
       '-f', 'rawvideo',
       '-pix_fmt', 'bgra',
       '-s', `${captureWidth}x${captureHeight}`,
-      '-r', String(fps),
+      '-framerate', String(fps),  // 使用-framerate而不是-r，作为提示而非强制
       '-i', 'pipe:0',
     );
 
@@ -973,6 +974,7 @@ class Recorder {
       '-preset', 'medium',
       '-crf', '15',
       '-pix_fmt', 'yuv420p',
+      '-vsync', 'vfr',  // 可变帧率模式，根据实际输入自适应
     );
 
     // 如果有音频，添加音频编码和映射
