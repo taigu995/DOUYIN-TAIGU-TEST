@@ -70,6 +70,13 @@ class Recorder {
     this.startTime = null;
     this.frameCount = 0;
     this.hasAudio = false; // 是否包含音频
+    
+    // 音视频同步时间戳（系统时间）
+    this._audioDataStartTime = 0;  // 音频首包数据时间
+    this._videoDataStartTime = 0;  // 视频首帧数据时间
+    this._audioProcessStartTime = 0; // 音频进程启动时间
+    this._videoProcessStartTime = 0; // 视频进程启动时间
+    
     this.onStatusChange = options.onStatusChange || (() => {});
     this.onError = options.onError || (() => {});
   }
@@ -839,6 +846,11 @@ class Recorder {
         if (msg.includes('time=') || msg.includes('frame=')) {
           // 有进度输出说明音频正在录制
           this._audioCaptureSuccess = true;
+          // 记录音频数据开始时间（首次检测到数据输出）
+          if (!this._audioDataStartTime) {
+            this._audioDataStartTime = Date.now();
+            logger.info(`[Recorder-Audio] 音频数据开始输出, 系统时间戳: ${this._audioDataStartTime}`);
+          }
         } else if (msg.includes('Error') || msg.includes('error')) {
           logger.warn(`[Recorder-Audio] ${msg.trim()}`);
         }
@@ -895,10 +907,16 @@ class Recorder {
       const ffmpegPath = getFFmpegPath();
       
       // 计算音视频时间戳偏移（单位：秒）
-      // 正值表示音频比视频晚启动，负值表示音频比视频早启动
+      // 优先使用数据开始时间（更精确），回退到进程启动时间
+      const audioDataStart = this._audioDataStartTime || this._audioStartTime;
+      const videoDataStart = this._videoDataStartTime || this._videoStartTime;
+      
       let audioOffset = 0;
-      if (this._audioStartTime && this._videoStartTime) {
-        audioOffset = (this._audioStartTime - this._videoStartTime) / 1000;
+      if (audioDataStart && videoDataStart) {
+        // 正值表示音频比视频晚开始输出数据，需要对音频应用负偏移
+        // 负值表示音频比视频早开始输出数据，需要对音频应用正偏移
+        audioOffset = (audioDataStart - videoDataStart) / 1000;
+        logger.info(`[Recorder] 音视频数据时间戳: 音频=${audioDataStart}ms, 视频=${videoDataStart}ms`);
         logger.info(`[Recorder] 音视频时间戳偏移: ${audioOffset.toFixed(3)}秒 (音频${audioOffset > 0 ? '晚' : '早'}于视频)`);
       }
       
@@ -907,9 +925,9 @@ class Recorder {
         '-i', this._videoTempFile,
       ];
       
-      // 如果音频比视频晚启动，需要对音频应用负偏移（让音频延迟播放）
-      // 如果音频比视频早启动，需要对音频应用正偏移（让音频提前播放）
-      if (audioOffset !== 0) {
+      // 如果音频比视频晚开始，需要对音频应用负偏移（让音频延迟播放）
+      // 如果音频比视频早开始，需要对音频应用正偏移（让音频提前播放）
+      if (Math.abs(audioOffset) > 0.05) { // 只在偏移>50ms时应用校正
         args.push('-itsoffset', audioOffset.toFixed(3));
       }
       
@@ -1300,6 +1318,11 @@ class Recorder {
             if (this.ffmpegProcess.stdin.writable) {
               this.ffmpegProcess.stdin.write(bitmap);
               this.frameCount++;
+              // 记录视频数据开始时间（首帧写入）
+              if (this.frameCount === 1) {
+                this._videoDataStartTime = Date.now();
+                logger.info(`[Recorder-Video] 视频数据开始输出, 系统时间戳: ${this._videoDataStartTime}, 帧数: ${this.frameCount}`);
+              }
             }
           } catch (writeErr) {
             // 忽略写入错误，可能是进程正在关闭
