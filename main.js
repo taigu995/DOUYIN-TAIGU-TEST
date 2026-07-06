@@ -99,11 +99,18 @@ function createTray() {
     { type: 'separator' },
     {
       label: '退出',
-      click: () => {
-        // 停止所有录制
+      click: async () => {
+        // 停止所有录制并等待清理完成
         if (streamManager) {
-          streamManager.destroyAll();
+          await streamManager.destroyAll();
         }
+        // 强制清理可能残留的 FFmpeg 进程
+        try {
+          const { execSync } = require('child_process');
+          if (process.platform === 'win32') {
+            execSync('taskkill /F /IM ffmpeg.exe /T 2>nul', { stdio: 'ignore' });
+          }
+        } catch (e) { /* 忽略 */ }
         tray.destroy();
         app.quit();
       }
@@ -578,10 +585,17 @@ app.on('second-instance', () => {
 });
 
 // 退出前清理
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
   if (streamManager) {
-    streamManager.destroyAll();
+    await streamManager.destroyAll();
   }
+  // 强制清理可能残留的 FFmpeg 进程
+  try {
+    const { execSync } = require('child_process');
+    if (process.platform === 'win32') {
+      execSync('taskkill /F /IM ffmpeg.exe /T 2>nul', { stdio: 'ignore' });
+    }
+  } catch (e) { /* 忽略 */ }
 });
 
 app.on('window-all-closed', () => {

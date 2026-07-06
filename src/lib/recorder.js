@@ -1365,14 +1365,42 @@ class Recorder {
   }
 
   /**
-   * 销毁捕获窗口
+   * 销毁录制器，强制终止所有进程
    */
   destroy() {
-    this.stopRecording();
+    // 停止帧捕获
+    if (this._captureInterval) {
+      clearInterval(this._captureInterval);
+      this._captureInterval = null;
+    }
+
+    // 强制终止视频 FFmpeg 进程
+    if (this.ffmpegProcess) {
+      try {
+        if (!this.ffmpegProcess.killed) {
+          this.ffmpegProcess.kill('SIGKILL');
+        }
+      } catch (e) { /* ignore */ }
+      this.ffmpegProcess = null;
+    }
+
+    // 强制终止音频 FFmpeg 进程
+    if (this._audioProcess) {
+      try {
+        if (!this._audioProcess.killed) {
+          this._audioProcess.kill('SIGKILL');
+        }
+      } catch (e) { /* ignore */ }
+      this._audioProcess = null;
+    }
+
+    // 销毁捕获窗口
     if (this.captureWindow && !this.captureWindow.isDestroyed()) {
-      this.captureWindow.destroy();
+      try { this.captureWindow.destroy(); } catch (e) { /* ignore */ }
       this.captureWindow = null;
     }
+
+    this.recording = false;
   }
 
   /**

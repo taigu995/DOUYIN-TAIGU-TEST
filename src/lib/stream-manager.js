@@ -856,14 +856,20 @@ class StreamManager {
    */
   destroyAll() {
     for (const [roomId, state] of this.streams) {
-      if (state.recorder) {
-        state.recorder.destroy();
-      }
+      // 停止监控定时器
       if (state.timer) {
         clearInterval(state.timer);
+        state.timer = null;
       }
+      // 强制销毁录制器（终止FFmpeg进程）
+      if (state.recorder) {
+        try { state.recorder.destroy(); } catch (e) { /* ignore */ }
+        state.recorder = null;
+      }
+      // 销毁监控窗口
       if (state.monitorWindow && !state.monitorWindow.isDestroyed()) {
-        state.monitorWindow.destroy();
+        try { state.monitorWindow.destroy(); } catch (e) { /* ignore */ }
+        state.monitorWindow = null;
       }
     }
     this.streams.clear();
