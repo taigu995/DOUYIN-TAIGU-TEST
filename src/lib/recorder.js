@@ -806,6 +806,62 @@ class Recorder {
     }
   }
 
+  /**
+   * 检测直播流的实际帧率
+   * @param {string} streamUrl - 直播流URL
+   * @returns {Promise<number>} 检测到的帧率，失败返回0
+   */
+  async _detectStreamFps(streamUrl) {
+    return new Promise((resolve) => {
+      const { execFile } = require('child_process');
+      const ffprobePath = require('@ffprobe-installer/ffprobe').path;
+      
+      const args = [
+        '-v', 'quiet',
+        '-print_format', 'json',
+        '-show_streams',
+        '-select_streams', 'v:0',
+        streamUrl
+      ];
+      
+      execFile(ffprobePath, args, { timeout: 5000 }, (error, stdout) => {
+        if (error) {
+          logger.warn(`[Recorder] FFprobe检测帧率失败: ${error.message}`);
+          resolve(0);
+          return;
+        }
+        
+        try {
+          const data = JSON.parse(stdout);
+          if (data.streams && data.streams[0]) {
+            const stream = data.streams[0];
+            // 尝试从 r_frame_rate 或 avg_frame_rate 获取帧率
+            const fpsStr = stream.r_frame_rate || stream.avg_frame_rate;
+            if (fpsStr) {
+              // 解析分数格式的帧率，如 "30/1" 或 "30000/1001"
+              const match = fpsStr.match(/^(\d+)\/(\d+)$/);
+              if (match) {
+                const fps = parseInt(match[1]) / parseInt(match[2]);
+                resolve(Math.round(fps));
+                return;
+              }
+              // 尝试直接解析数字
+              const fps = parseFloat(fpsStr);
+              if (!isNaN(fps) && fps > 0) {
+                resolve(Math.round(fps));
+                return;
+              }
+            }
+          }
+          resolve(0);
+        } catch (e) {
+          logger.warn(`[Recorder] 解析FFprobe输出失败: ${e.message}`);
+          resolve(0);
+        }
+      });
+    });
+  }
+
 
   /**
    * 获取输出文件大小
@@ -874,6 +930,18 @@ class Recorder {
       logger.info('[Recorder] 尝试提取直播流URL...');
       const streamInfo = await this.extractStreamUrl();
 
+      // 检测直播流的实际帧率
+      let streamFps = config.fps || 30;
+      if (streamInfo && streamInfo.url) {
+        const detectedFps = await this._detectStreamFps(streamInfo.url);
+        if (detectedFps > 0) {
+          streamFps = detectedFps;
+          logger.info(`[Recorder] 检测到直播流帧率: ${streamFps}fps`);
+        } else {
+          logger.warn(`[Recorder] 未能检测到直播流帧率，使用配置值: ${streamFps}fps`);
+        }
+      }
+
       // 始终使用离屏渲染录制视频（含弹幕画面）
       this.hasAudio = false;
       this._isStreamMode = false;
@@ -891,13 +959,13 @@ class Recorder {
         await new Promise(resolve => setTimeout(resolve, 100));
         
         // 启动单FFmpeg进程（视频+音频）
-        logger.info(`[Recorder] 启动 FFmpeg 进程 (视频+音频), FPS: ${config.fps || 30}`);
+        logger.info(`[Recorder] 启动 FFmpeg 进程 (视频+音频), FPS: ${streamFps}`);
         this._streamUrl = streamInfo.url;
-        this.startFFmpegProcess(config.fps || 30, streamInfo.url);
+        this.startFFmpegProcess(streamFps, streamInfo.url);
       } else {
         logger.warn('[Recorder] 未能提取直播流URL，仅录制视频（无音频）');
         this.hasAudio = false;
-        this.startFFmpegProcess(config.fps || 30, null);
+        this.startFFmpegProcess(streamFps, null);
         this.startCapture();
         this.recording = true;
       }

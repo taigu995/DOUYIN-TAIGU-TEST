@@ -12,6 +12,7 @@
   "dependencies": {
     "fluent-ffmpeg": "^2.1.3",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.0",
     "electron-store": "^8.2.0"
   },
   "devDependencies": {
@@ -26,6 +27,7 @@
     },
     "asarUnpack": [
       "node_modules/@ffmpeg-installer/**/*",
+      "node_modules/@ffprobe-installer/**/*",
       "node_modules/fluent-ffmpeg/**/*"
     ],
     "win": {
