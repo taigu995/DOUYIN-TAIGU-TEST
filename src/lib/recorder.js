@@ -82,9 +82,9 @@ class Recorder {
   async createCaptureWindow() {
     const config = getConfig();
 
-    // 固定捕获分辨率为 1280x720 (16:9) - 平衡画质与捕获速度
-    const CAPTURE_WIDTH = 1600;
-    const CAPTURE_HEIGHT = 900;
+    // 固定捕获分辨率为 1280x720 - 降低分辨率以提高捕获帧率
+    const CAPTURE_WIDTH = 1280;
+    const CAPTURE_HEIGHT = 720;
 
     this.captureWindow = new BrowserWindow({
       width: CAPTURE_WIDTH,
@@ -941,9 +941,9 @@ class Recorder {
     const { spawn } = require('child_process');
 
     // 捕获分辨率（用于FFmpeg输入尺寸）
-    // 使用较大尺寸以包含视频+右侧评论区
-    const captureWidth = 1600;
-    const captureHeight = 900;
+    // 降低分辨率以提高捕获帧率，确保达到30fps
+    const captureWidth = 1280;
+    const captureHeight = 720;
     
     const args = [];
 
@@ -1063,9 +1063,9 @@ class Recorder {
 
     const config = getConfig();
     const targetFps = config.fps || 30;
-    // 捕获分辨率：使用1280x720以提高捕获速度，FFmpeg编码时保持原始尺寸
-    const CAPTURE_WIDTH = 1600;
-    const CAPTURE_HEIGHT = 900;
+    // 捕获分辨率：降低到1280x720以提高捕获速度，确保达到30fps
+    const CAPTURE_WIDTH = 1280;
+    const CAPTURE_HEIGHT = 720;
     const targetInterval = Math.floor(1000 / targetFps);
 
     let lastCaptureTime = 0;
