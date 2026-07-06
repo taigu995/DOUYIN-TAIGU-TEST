@@ -930,15 +930,15 @@ class Recorder {
       logger.info('[Recorder] 尝试提取直播流URL...');
       const streamInfo = await this.extractStreamUrl();
 
-      // 检测直播流的实际帧率
-      let streamFps = config.fps || 30;
+      // 检测直播流的实际帧率（自动检测，不再使用配置值）
+      let streamFps = 30; // 默认值
       if (streamInfo && streamInfo.url) {
         const detectedFps = await this._detectStreamFps(streamInfo.url);
         if (detectedFps > 0) {
           streamFps = detectedFps;
           logger.info(`[Recorder] 检测到直播流帧率: ${streamFps}fps`);
         } else {
-          logger.warn(`[Recorder] 未能检测到直播流帧率，使用配置值: ${streamFps}fps`);
+          logger.warn(`[Recorder] 未能检测到直播流帧率，使用默认值: ${streamFps}fps`);
         }
       }
 
