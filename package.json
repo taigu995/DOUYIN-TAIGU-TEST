@@ -10,14 +10,16 @@
     "preview": "npx serve src -l ${DEPLOY_RUN_PORT}"
   },
   "dependencies": {
-    "fluent-ffmpeg": "^2.1.3",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.0",
-    "electron-store": "^8.2.0"
+    "electron-store": "^8.2.0",
+    "fluent-ffmpeg": "^2.1.3"
   },
   "devDependencies": {
     "electron": "^33.0.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^3.0.2",
+    "to-ico": "^1.1.5"
   },
   "build": {
     "appId": "com.douyin.recorder",
@@ -34,10 +36,12 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
-      "icon": "build/icon.png",
+      "icon": "build/icon.ico",
       "signAndEditExecutable": false
     },
     "nsis": {
