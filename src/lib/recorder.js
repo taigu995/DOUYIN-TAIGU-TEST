@@ -1046,6 +1046,11 @@ class Recorder {
         logger.info('[Recorder] 使用混合模式：离屏渲染录制弹幕视频 + 直播流提取音频');
         this._startAudioCapture(streamInfo);
         this.hasAudio = true;
+        
+        // 等待音频流稳定（预热期）
+        logger.info('[Recorder] 等待音频流稳定 (3秒预热)...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        logger.info('[Recorder] 音频流预热完成，开始同步录制');
       } else {
         logger.warn('[Recorder] 未能提取直播流URL，仅录制视频（无音频）');
       }
