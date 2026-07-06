@@ -963,8 +963,9 @@ class Recorder {
     }
 
     // 视频输入（从管道读取原始帧）- 作为第二个输入
-    // 使用固定帧率，让FFmpeg根据实际帧交付速率自适应
+    // 使用 wallclock 时间戳，根据实际帧到达时间自适应
     args.push(
+      '-use_wallclock_as_timestamps', '1',
       '-f', 'rawvideo',
       '-pix_fmt', 'bgra',
       '-s', `${captureWidth}x${captureHeight}`,
