@@ -50,6 +50,35 @@ const elements = {
 // 当前直播间数据
 let streamsData = [];
 
+// 非阻塞确认弹窗（替代原生 confirm，避免阻塞渲染进程导致输入卡顿）
+function showConfirm(message) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay';
+    overlay.innerHTML = `
+      <div class="confirm-dialog">
+        <p class="confirm-message">${message}</p>
+        <div class="confirm-buttons">
+          <button class="btn btn-secondary confirm-cancel">取消</button>
+          <button class="btn btn-danger confirm-ok">确定</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const cleanup = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+
+    overlay.querySelector('.confirm-ok').addEventListener('click', () => cleanup(true));
+    overlay.querySelector('.confirm-cancel').addEventListener('click', () => cleanup(false));
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) cleanup(false);
+    });
+  });
+}
+
 // ========== 登录状态 ==========
 async function updateLoginStatus() {
   if (!isElectron) return;
@@ -173,7 +202,7 @@ function bindEvents() {
         showToast('此功能仅在桌面应用中可用', 'warning');
         return;
       }
-      if (!confirm('确定要清除登录数据吗？清除后需要重新登录抖音账号。')) {
+      if (!await showConfirm('确定要清除登录数据吗？清除后需要重新登录抖音账号。')) {
         return;
       }
       const result = await window.electronAPI.clearLogin();
@@ -429,7 +458,7 @@ async function exportLogs() {
 
 async function clearLogs() {
   if (!isElectron) return;
-  if (!confirm('确定要清空所有日志吗？此操作不可恢复。')) return;
+  if (!await showConfirm('确定要清空所有日志吗？此操作不可恢复。')) return;
   try {
     const result = await window.electronAPI.clearLogs();
     if (result.success) {
@@ -595,7 +624,7 @@ window.handleStopRecording = async function (roomId) {
 };
 
 window.handleRemoveStream = async function (roomId) {
-  if (!confirm('确定要删除这个直播间吗？')) return;
+  if (!await showConfirm('确定要删除这个直播间吗？')) return;
   if (!isElectron) return;
   try {
     const result = await window.electronAPI.removeStream(roomId);

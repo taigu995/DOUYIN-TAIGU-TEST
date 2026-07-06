@@ -1155,3 +1155,67 @@ body {
     width: 100%;
   }
 }
+
+/* ========== 确认弹窗 ========== */
+.confirm-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.15s ease;
+}
+
+.confirm-dialog {
+  background: #1e1e2e;
+  border: 1px solid #333;
+  border-radius: 12px;
+  padding: 24px;
+  min-width: 320px;
+  max-width: 400px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.confirm-message {
+  color: #e0e0e0;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 20px 0;
+}
+
+.confirm-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-buttons .btn {
+  padding: 8px 20px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.confirm-buttons .btn-secondary {
+  background: #333;
+  color: #ccc;
+  border: 1px solid #444;
+}
+
+.confirm-buttons .btn-secondary:hover {
+  background: #444;
+}
+
+.confirm-buttons .btn-danger {
+  background: #e74c3c;
+  color: white;
+  border: none;
+}
+
+.confirm-buttons .btn-danger:hover {
+  background: #c0392b;
+}
