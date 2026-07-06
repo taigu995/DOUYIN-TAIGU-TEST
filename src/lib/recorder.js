@@ -959,12 +959,13 @@ class Recorder {
     }
 
     // 视频输入（从管道读取原始帧）- 作为第二个输入
-    // 使用实际帧率模式：不强制指定输入帧率，让FFmpeg根据实际数据自适应
+    // 使用wallclock时间戳，根据实际帧到达时间计算，而非假设固定帧率
     args.push(
       '-f', 'rawvideo',
       '-pix_fmt', 'bgra',
       '-s', `${captureWidth}x${captureHeight}`,
-      '-framerate', String(fps),  // 使用-framerate而不是-r，作为提示而非强制
+      '-use_wallclock_as_timestamps', '1',  // 使用实际时间戳
+      '-framerate', String(fps),  // 作为参考，但不强制
       '-i', 'pipe:0',
     );
 
