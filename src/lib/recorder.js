@@ -963,13 +963,12 @@ class Recorder {
     }
 
     // 视频输入（从管道读取原始帧）- 作为第二个输入
-    // 使用wallclock时间戳，根据实际帧到达时间计算，而非假设固定帧率
+    // 使用固定帧率，让FFmpeg根据实际帧交付速率自适应
     args.push(
       '-f', 'rawvideo',
       '-pix_fmt', 'bgra',
       '-s', `${captureWidth}x${captureHeight}`,
-      '-use_wallclock_as_timestamps', '1',  // 使用实际时间戳
-      '-framerate', String(fps),  // 作为参考，但不强制
+      '-framerate', String(fps),
       '-i', 'pipe:0',
     );
 
@@ -989,6 +988,7 @@ class Recorder {
         '-map', '1:v',     // 第二个输入(pipe)的视频
         '-c:a', 'aac',
         '-b:a', '192k',
+        '-async', '1',     // 音频同步
         '-shortest',       // 以最短的流为准
       );
     }
