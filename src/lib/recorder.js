@@ -81,8 +81,8 @@ class Recorder {
     const config = getConfig();
 
     // 固定捕获分辨率为 1280x720 (16:9) - 平衡画质与捕获速度
-    const CAPTURE_WIDTH = 1280;
-    const CAPTURE_HEIGHT = 720;
+    const CAPTURE_WIDTH = 1600;
+    const CAPTURE_HEIGHT = 900;
 
     this.captureWindow = new BrowserWindow({
       width: CAPTURE_WIDTH,
@@ -265,7 +265,7 @@ class Recorder {
             /* 隐藏滚动条 */
             ::-webkit-scrollbar { display: none !important; }
             * { scrollbar-width: none !important; }
-            /* 关闭直播画面区域的弹幕滚动 */
+            /* 关闭直播画面区域的弹幕滚动（浮动弹幕层） */
             [class*="danmu"], [class*="barrage"], [class*="Danmu"], [class*="Barrage"] {
               display: none !important;
               visibility: hidden !important;
@@ -275,13 +275,7 @@ class Recorder {
             canvas[class*="danmu"], canvas[class*="barrage"] {
               display: none !important;
             }
-            /* 隐藏抖音直播弹幕容器 */
-            .webcast-chatroom___inner,
-            [class*="chat-room"], [class*="chatRoom"],
-            [class*="danmaku"], [class*="DanmakuContainer"],
-            [data-e2e="danmaku"], [data-e2e="barrage"] {
-              display: none !important;
-            }
+            /* 保留右侧评论区，不隐藏 */
           \`;
           document.head.appendChild(style);
           
@@ -1107,9 +1101,10 @@ class Recorder {
     // 同步检测音频设备（避免异步导致FFmpeg进程延迟启动）
     const audioDevice = this._detectAudioDeviceSync();
     
-    // 捕获分辨率与FFmpeg输入尺寸匹配（1280x720 以提高捕获速度）
-    const captureWidth = 1280;
-    const captureHeight = 720;
+    // 捕获分辨率（用于FFmpeg输入尺寸）
+    // 使用较大尺寸以包含视频+右侧评论区，FFmpeg会自动缩放到输出尺寸
+    const captureWidth = 1600;
+    const captureHeight = 900;
     
     const args = [
       // 视频输入（从管道读取原始帧）
@@ -1213,8 +1208,8 @@ class Recorder {
     const config = getConfig();
     const targetFps = config.fps || 30;
     // 捕获分辨率：使用1280x720以提高捕获速度，FFmpeg编码时保持原始尺寸
-    const CAPTURE_WIDTH = 1280;
-    const CAPTURE_HEIGHT = 720;
+    const CAPTURE_WIDTH = 1600;
+    const CAPTURE_HEIGHT = 900;
     const targetInterval = Math.floor(1000 / targetFps);
 
     let lastCaptureTime = 0;
@@ -1238,13 +1233,8 @@ class Recorder {
       const now = Date.now();
 
       try {
-        // 使用 capturePage 的 rect 参数，严格只捕获视口区域
-        const image = await this.captureWindow.webContents.capturePage({
-          x: 0,
-          y: 0,
-          width: CAPTURE_WIDTH,
-          height: CAPTURE_HEIGHT
-        });
+        // 捕获完整页面区域（包含视频+右侧评论区）
+        const image = await this.captureWindow.webContents.capturePage();
         
         // 获取图像实际尺寸并验证
         const imgSize = image.getSize();
