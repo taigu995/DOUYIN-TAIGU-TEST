@@ -839,7 +839,6 @@ class Recorder {
 
       // 生成时间戳
       const now = new Date();
-      this.startTime = now;
       const pad = (n) => String(n).padStart(2, '0');
       const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
       const timeStrFull = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
@@ -896,6 +895,9 @@ class Recorder {
       this.startCapture();
 
       this.recording = true;
+      
+      // 设置录制开始时间（FFmpeg启动后）
+      this.startTime = now;
 
       logger.info(`[Recorder] 录制已开始: ${this.streamerName} -> ${this.outputFile}`);
 
