@@ -955,6 +955,7 @@ class Recorder {
     if (streamUrl) {
       args.push(
         '-thread_queue_size', '512',  // 增加线程队列大小，避免阻塞警告
+        '-fflags', '+genpts',  // 为音频流生成新的时间戳，从0开始
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '5',
@@ -967,6 +968,7 @@ class Recorder {
     // 使用固定帧率时间戳，与音频时间基准对齐
     args.push(
       '-thread_queue_size', '512',  // 增加线程队列大小，避免阻塞警告
+      '-fflags', '+genpts',  // 为视频流生成新的时间戳，从0开始
       '-f', 'rawvideo',
       '-pix_fmt', 'bgra',
       '-s', `${captureWidth}x${captureHeight}`,
