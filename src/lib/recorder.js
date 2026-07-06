@@ -71,6 +71,7 @@ class Recorder {
     this.frameCount = 0;
     this.hasAudio = false; // 是否包含音频
     this._streamUrl = null; // 直播流URL（方案A：用于音频输入）
+    this._frameBuffer = []; // 帧缓冲（FFmpeg启动前缓冲帧）
     
     this.onStatusChange = options.onStatusChange || (() => {});
     this.onError = options.onError || (() => {});
@@ -882,6 +883,13 @@ class Recorder {
         logger.info('[Recorder] 使用方案A：单FFmpeg进程同时处理视频和音频');
         this.hasAudio = true;
         
+        // 先开始捕获帧，缓冲几帧后再启动FFmpeg，确保音视频同时开始
+        this.recording = true;
+        this.startCapture();
+        
+        // 等待几帧缓冲（约100ms）
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         // 启动单FFmpeg进程（视频+音频）
         logger.info(`[Recorder] 启动 FFmpeg 进程 (视频+音频), FPS: ${config.fps || 30}`);
         this._streamUrl = streamInfo.url;
@@ -890,11 +898,9 @@ class Recorder {
         logger.warn('[Recorder] 未能提取直播流URL，仅录制视频（无音频）');
         this.hasAudio = false;
         this.startFFmpegProcess(config.fps || 30, null);
+        this.startCapture();
+        this.recording = true;
       }
-      
-      this.startCapture();
-
-      this.recording = true;
       
       // 设置录制开始时间（FFmpeg启动后）
       this.startTime = now;
@@ -1132,6 +1138,15 @@ class Recorder {
           try {
             // 检查 stdin 是否可写（防止 write after end 错误）
             if (this.ffmpegProcess.stdin.writable) {
+              // 如果有缓冲帧，先写入缓冲帧
+              if (this._frameBuffer && this._frameBuffer.length > 0) {
+                for (const bufferedFrame of this._frameBuffer) {
+                  this.ffmpegProcess.stdin.write(bufferedFrame);
+                  this.frameCount++;
+                }
+                this._frameBuffer = [];
+              }
+              // 写入当前帧
               this.ffmpegProcess.stdin.write(bitmap);
               this.frameCount++;
             }
@@ -1141,6 +1156,14 @@ class Recorder {
                 writeErr.code !== 'ERR_STREAM_DESTROYED') {
               logger.warn('[Recorder] 写入帧数据出错:', writeErr.message);
             }
+          }
+        } else if (this.recording) {
+          // FFmpeg 还未启动，缓冲帧（最多缓冲10帧）
+          if (!this._frameBuffer) {
+            this._frameBuffer = [];
+          }
+          if (this._frameBuffer.length < 10) {
+            this._frameBuffer.push(bitmap);
           }
         }
       } catch (err) {
@@ -1299,6 +1322,9 @@ class Recorder {
       clearInterval(this._captureInterval);
       this._captureInterval = null;
     }
+
+    // 清空帧缓冲
+    this._frameBuffer = [];
 
     // 强制终止 FFmpeg 进程（方案A：单进程，无音频进程）
     if (this.ffmpegProcess) {
