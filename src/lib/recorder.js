@@ -810,6 +810,116 @@ class Recorder {
   }
 
   /**
+   * 启动音频捕获（从直播流提取音频，与离屏渲染视频同步录制）
+   */
+  _startAudioCapture(streamInfo) {
+    try {
+      const ffmpegPath = getFFmpegPath();
+      // 音频临时文件（录制结束后会合并到最终文件并删除）
+      this._audioTempFile = this.outputFile.replace(/\.mp4$/, '_audio.m4a');
+      this._videoTempFile = this.outputFile.replace(/\.mp4$/, '_video.mp4');
+
+      const args = [
+        '-y',
+        '-i', streamInfo.url,
+        '-vn',                    // 不要视频
+        '-c:a', 'aac',            // 音频编码 AAC
+        '-b:a', '192k',           // 音频比特率
+        this._audioTempFile
+      ];
+
+      logger.info(`[Recorder] 启动音频捕获 FFmpeg: ${streamInfo.url.substring(0, 80)}...`);
+
+      this._audioProcess = spawn(ffmpegPath, args, {
+        windowsHide: true
+      });
+
+      this._audioProcess.stderr.on('data', (data) => {
+        const msg = data.toString();
+        if (msg.includes('time=') || msg.includes('frame=')) {
+          // 静默处理进度信息
+        } else if (msg.includes('Error') || msg.includes('error')) {
+          logger.warn(`[Recorder-Audio] ${msg.trim()}`);
+        }
+      });
+
+      this._audioProcess.on('close', (code) => {
+        logger.info(`[Recorder-Audio] 音频进程退出, code: ${code}`);
+      });
+
+      this._audioProcess.on('error', (err) => {
+        logger.error(`[Recorder-Audio] 音频进程错误: ${err.message}`);
+      });
+
+    } catch (e) {
+      logger.warn(`[Recorder] 启动音频捕获失败: ${e.message}`);
+      this.hasAudio = false;
+    }
+  }
+
+  /**
+   * 合并视频和音频文件
+   */
+  async _mergeVideoAndAudio() {
+    if (!this._videoTempFile || !this._audioTempFile) return false;
+    if (!fs.existsSync(this._videoTempFile) || !fs.existsSync(this._audioTempFile)) return false;
+
+    try {
+      const ffmpegPath = getFFmpegPath();
+      const args = [
+        '-y',
+        '-i', this._videoTempFile,
+        '-i', this._audioTempFile,
+        '-c:v', 'copy',           // 视频直接复制（不重新编码）
+        '-c:a', 'aac',            // 音频直接复制
+        '-map', '0:v:0',          // 从第一个输入取视频
+        '-map', '1:a:0',          // 从第二个输入取音频
+        '-shortest',              // 以最短的流为准
+        '-movflags', '+faststart',
+        this.outputFile
+      ];
+
+      logger.info('[Recorder] 正在合并视频和音频...');
+
+      return new Promise((resolve) => {
+        const mergeProcess = spawn(ffmpegPath, args, { windowsHide: true });
+
+        mergeProcess.on('close', (code) => {
+          if (code === 0) {
+            logger.info(`[Recorder] 合并完成: ${this.outputFile}`);
+            // 删除临时文件
+            try { fs.unlinkSync(this._videoTempFile); } catch (e) { /* ignore */ }
+            try { fs.unlinkSync(this._audioTempFile); } catch (e) { /* ignore */ }
+            resolve(true);
+          } else {
+            logger.warn(`[Recorder] 合并失败 (code: ${code})，保留纯视频文件`);
+            // 合并失败时，将视频文件重命名为最终文件
+            try {
+              fs.renameSync(this._videoTempFile, this.outputFile);
+              fs.unlinkSync(this._audioTempFile);
+            } catch (e) { /* ignore */ }
+            resolve(false);
+          }
+        });
+
+        mergeProcess.on('error', (err) => {
+          logger.error(`[Recorder] 合并进程错误: ${err.message}`);
+          try {
+            fs.renameSync(this._videoTempFile, this.outputFile);
+          } catch (e) { /* ignore */ }
+          resolve(false);
+        });
+      });
+    } catch (e) {
+      logger.warn(`[Recorder] 合并异常: ${e.message}`);
+      try {
+        fs.renameSync(this._videoTempFile, this.outputFile);
+      } catch (e2) { /* ignore */ }
+      return false;
+    }
+  }
+
+  /**
    * 获取输出文件大小
    */
   _getFileSize() {
@@ -864,24 +974,27 @@ class Recorder {
       // 等待页面加载
       await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // 尝试提取直播流URL
+      // 尝试提取直播流URL（用于音频捕获）
       logger.info('[Recorder] 尝试提取直播流URL...');
       const streamInfo = await this.extractStreamUrl();
 
-      if (streamInfo && streamInfo.url) {
-        // 使用直播流直接录制（含音频）
-        logger.info('[Recorder] 成功提取直播流URL，使用流直接录制模式（含音频）');
-        this.startStreamRecording(streamInfo);
-      } else {
-        // 回退到离屏渲染方案
-        logger.warn('[Recorder] 未能提取直播流URL，回退到离屏渲染录制模式（无音频）');
-        this.hasAudio = false;
-        logger.info(`[Recorder] 启动 FFmpeg 进程, FPS: ${config.fps || 30}`);
-        this.startFFmpegProcess(config.fps || 30);
+      // 始终使用离屏渲染录制视频（含弹幕画面）
+      this.hasAudio = false;
+      this._isStreamMode = false;
 
-        // 开始捕获帧
-        this.startCapture();
+      if (streamInfo && streamInfo.url) {
+        // 同时启动音频捕获（从直播流提取音频）
+        logger.info('[Recorder] 使用混合模式：离屏渲染录制弹幕视频 + 直播流提取音频');
+        this._startAudioCapture(streamInfo);
+        this.hasAudio = true;
+      } else {
+        logger.warn('[Recorder] 未能提取直播流URL，仅录制视频（无音频）');
       }
+
+      // 启动视频录制（离屏渲染 + FFmpeg 编码）
+      logger.info(`[Recorder] 启动 FFmpeg 视频进程, FPS: ${config.fps || 30}`);
+      this.startFFmpegProcess(config.fps || 30);
+      this.startCapture();
 
       this.recording = true;
 
@@ -958,7 +1071,7 @@ class Recorder {
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
       '-y',
-      this.outputFile
+      this._audioTempFile ? this._videoTempFile : this.outputFile
     );
 
     logger.info(`[Recorder] 启动 FFmpeg: ${resolvedPath}, 输入格式: bgra`);
@@ -1173,12 +1286,34 @@ class Recorder {
 
     // 离屏模式：关闭 stdin 让 FFmpeg 完成编码
     if (this.ffmpegProcess && this.ffmpegProcess.stdin) {
-      return new Promise((resolve) => {
+      // 同时停止音频捕获进程
+      if (this._audioProcess) {
+        try {
+          // Windows: 使用 taskkill 确保进程终止
+          if (process.platform === 'win32') {
+            const { execSync } = require('child_process');
+            execSync(`taskkill /pid ${this._audioProcess.pid} /f /t`, { stdio: 'ignore' });
+          } else {
+            this._audioProcess.kill('SIGKILL');
+          }
+        } catch (e) { /* ignore */ }
+        this._audioProcess = null;
+      }
+
+      return new Promise(async (resolve) => {
         let resolved = false;
-        const done = () => {
+        const done = async () => {
           if (resolved) return;
           resolved = true;
-          
+
+          // 如果有音频文件，合并视频和音频
+          if (this._audioTempFile && this._videoTempFile) {
+            await this._mergeVideoAndAudio();
+            // 清理临时文件引用
+            this._audioTempFile = null;
+            this._videoTempFile = null;
+          }
+
           const fileSize = this._getFileSize();
           
           this.onStatusChange('stopped', {
@@ -1201,7 +1336,7 @@ class Recorder {
             try { this.ffmpegProcess.kill('SIGKILL'); } catch (e) { /* ignore */ }
           }
           done();
-        }, 10000);
+        }, 15000);
       });
     }
 
