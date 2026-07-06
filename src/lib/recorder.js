@@ -8,6 +8,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 const { generateFileName } = require('./douyin-utils');
 const { getConfig } = require('./config');
 const { getLogger } = require('./logger');
@@ -818,9 +819,13 @@ class Recorder {
       // 音频临时文件（录制结束后会合并到最终文件并删除）
       this._audioTempFile = this.outputFile.replace(/\.mp4$/, '_audio.m4a');
       this._videoTempFile = this.outputFile.replace(/\.mp4$/, '_video.mp4');
+      this._audioCaptureSuccess = false; // 标记音频是否成功录制
 
       const args = [
         '-y',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
         '-i', streamInfo.url,
         '-vn',                    // 不要视频
         '-c:a', 'aac',            // 音频编码 AAC
@@ -830,7 +835,6 @@ class Recorder {
 
       logger.info(`[Recorder] 启动音频捕获 FFmpeg: ${streamInfo.url.substring(0, 80)}...`);
 
-      const { spawn } = require('child_process');
       this._audioProcess = spawn(ffmpegPath, args, {
         windowsHide: true
       });
@@ -838,7 +842,8 @@ class Recorder {
       this._audioProcess.stderr.on('data', (data) => {
         const msg = data.toString();
         if (msg.includes('time=') || msg.includes('frame=')) {
-          // 静默处理进度信息
+          // 有进度输出说明音频正在录制
+          this._audioCaptureSuccess = true;
         } else if (msg.includes('Error') || msg.includes('error')) {
           logger.warn(`[Recorder-Audio] ${msg.trim()}`);
         }
@@ -846,6 +851,20 @@ class Recorder {
 
       this._audioProcess.on('close', (code) => {
         logger.info(`[Recorder-Audio] 音频进程退出, code: ${code}`);
+        // 检查音频文件是否有效
+        if (this._audioTempFile && fs.existsSync(this._audioTempFile)) {
+          const stat = fs.statSync(this._audioTempFile);
+          if (stat.size > 0) {
+            this._audioCaptureSuccess = true;
+            logger.info(`[Recorder-Audio] 音频文件有效, 大小: ${(stat.size / 1024).toFixed(1)}KB`);
+          } else {
+            this._audioCaptureSuccess = false;
+            logger.warn('[Recorder-Audio] 音频文件为空');
+          }
+        } else {
+          this._audioCaptureSuccess = false;
+          logger.warn('[Recorder-Audio] 音频文件不存在');
+        }
       });
 
       this._audioProcess.on('error', (err) => {
@@ -865,6 +884,18 @@ class Recorder {
     if (!this._videoTempFile || !this._audioTempFile) return false;
     if (!fs.existsSync(this._videoTempFile) || !fs.existsSync(this._audioTempFile)) return false;
 
+    // 检查音频文件是否有效（大于1KB）
+    try {
+      const audioStat = fs.statSync(this._audioTempFile);
+      if (audioStat.size < 1024) {
+        logger.warn(`[Recorder] 音频文件过小 (${audioStat.size} bytes)，跳过合并`);
+        return false;
+      }
+    } catch (e) {
+      logger.warn(`[Recorder] 无法读取音频文件: ${e.message}`);
+      return false;
+    }
+
     try {
       const ffmpegPath = getFFmpegPath();
       const args = [
@@ -872,7 +903,7 @@ class Recorder {
         '-i', this._videoTempFile,
         '-i', this._audioTempFile,
         '-c:v', 'copy',           // 视频直接复制（不重新编码）
-        '-c:a', 'aac',            // 音频直接复制
+        '-c:a', 'aac',            // 音频编码 AAC
         '-map', '0:v:0',          // 从第一个输入取视频
         '-map', '1:a:0',          // 从第二个输入取音频
         '-shortest',              // 以最短的流为准
@@ -881,13 +912,32 @@ class Recorder {
       ];
 
       logger.info('[Recorder] 正在合并视频和音频...');
+      if (this.onMergeProgress) {
+        this.onMergeProgress(0);
+      }
 
       return new Promise((resolve) => {
         const mergeProcess = spawn(ffmpegPath, args, { windowsHide: true });
+        let lastProgress = 0;
+
+        mergeProcess.stderr.on('data', (data) => {
+          const msg = data.toString();
+          // 解析合并进度
+          const timeMatch = msg.match(/time=(\d+):(\d+):(\d+)\.(\d+)/);
+          if (timeMatch && this.onMergeProgress) {
+            // 简单进度估算（基于时间）
+            const totalSec = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3]);
+            if (totalSec > lastProgress) {
+              lastProgress = totalSec;
+              this.onMergeProgress(Math.min(totalSec * 10, 90)); // 估算进度
+            }
+          }
+        });
 
         mergeProcess.on('close', (code) => {
           if (code === 0) {
             logger.info(`[Recorder] 合并完成: ${this.outputFile}`);
+            if (this.onMergeProgress) this.onMergeProgress(100);
             // 删除临时文件
             try { fs.unlinkSync(this._videoTempFile); } catch (e) { /* ignore */ }
             try { fs.unlinkSync(this._audioTempFile); } catch (e) { /* ignore */ }
@@ -951,15 +1001,24 @@ class Recorder {
       // 按主播名称创建子文件夹
       const streamerFolder = path.join(baseOutputFolder, this.streamerName);
 
-      // 确保输出目录存在（包括主播子文件夹）
-      if (!fs.existsSync(streamerFolder)) {
-        fs.mkdirSync(streamerFolder, { recursive: true });
+      // 生成时间戳
+      const now = new Date();
+      this.startTime = now;
+      const pad = (n) => String(n).padStart(2, '0');
+      const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      const timeStrFull = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+      const timeStrShort = `${pad(now.getHours())}-${pad(now.getMinutes())}`;
+      const safeName = (this.streamerName || '未知主播').replace(/[<>:"/\\|?*]/g, '_');
+
+      // 子文件夹: [主播名称][年-月-日][时-分-秒]
+      const sessionFolder = path.join(streamerFolder, `[${safeName}][${dateStr}][${timeStrFull}]`);
+      if (!fs.existsSync(sessionFolder)) {
+        fs.mkdirSync(sessionFolder, { recursive: true });
       }
 
-      // 生成文件名
-      const fileName = generateFileName(this.streamerName);
-      this.outputFile = path.join(streamerFolder, `${fileName}.${config.fileFormat || 'mp4'}`);
-      this.startTime = new Date();
+      // 输出文件: [主播名称][年-月-日][时-分].mp4
+      const fileName = `[${safeName}][${dateStr}][${timeStrShort}]`;
+      this.outputFile = path.join(sessionFolder, `${fileName}.${config.fileFormat || 'mp4'}`);
       this.frameCount = 0;
       this._isStreamMode = false;
 
@@ -1307,9 +1366,20 @@ class Recorder {
           if (resolved) return;
           resolved = true;
 
-          // 如果有音频文件，合并视频和音频
-          if (this._audioTempFile && this._videoTempFile) {
+          // 等待音频进程完全退出并写入文件
+          if (this._audioProcess) {
+            await new Promise(r => setTimeout(r, 1000));
+          }
+
+          let mergeResult = null; // null = 无音频, true = 合并成功, false = 合并失败
+
+          // 如果有音频文件且音频录制成功，合并视频和音频
+          if (this._audioTempFile && this._videoTempFile && this._audioCaptureSuccess) {
+            logger.info('[Recorder] 音频录制成功，尝试合并视频和音频...');
+            this._mergeProgress = 0;
             const merged = await this._mergeVideoAndAudio();
+            this._mergeProgress = 100;
+            mergeResult = merged;
             if (!merged) {
               // 合并失败，将视频临时文件重命名为最终输出
               try {
@@ -1328,7 +1398,31 @@ class Recorder {
             } catch (e) { /* ignore */ }
             this._audioTempFile = null;
             this._videoTempFile = null;
+          } else if (this._videoTempFile) {
+            // 没有音频或音频失败，直接将视频临时文件重命名为最终输出
+            try {
+              if (fs.existsSync(this._videoTempFile)) {
+                fs.renameSync(this._videoTempFile, this.outputFile);
+                logger.info('[Recorder] 无有效音频，已保留纯视频文件');
+              }
+            } catch (e) {
+              logger.warn(`[Recorder] 重命名视频文件失败: ${e.message}`);
+            }
+            // 清理音频临时文件
+            try {
+              if (this._audioTempFile && fs.existsSync(this._audioTempFile)) fs.unlinkSync(this._audioTempFile);
+            } catch (e) { /* ignore */ }
+            this._audioTempFile = null;
+            this._videoTempFile = null;
           }
+
+          // 保存录制结果供UI显示
+          this._lastRecordingResult = {
+            hasAudio: this._audioCaptureSuccess || false,
+            mergeResult: mergeResult, // true=合并成功, false=合并失败, null=无音频
+            outputFile: this.outputFile,
+            timestamp: Date.now()
+          };
 
           const fileSize = this._getFileSize();
           
@@ -1338,7 +1432,9 @@ class Recorder {
             outputFile: this.outputFile,
             fileSize: fileSize,
             duration: Date.now() - (this.startTime ? this.startTime.getTime() : Date.now()),
-            frameCount: this.frameCount
+            frameCount: this.frameCount,
+            hasAudio: this._audioCaptureSuccess || false,
+            mergeResult: mergeResult
           });
           resolve();
         };
@@ -1423,6 +1519,9 @@ class Recorder {
       frameCount: this.frameCount,
       startTime: this.startTime,
       hasAudio: this.hasAudio,
+      audioCaptureSuccess: this._audioCaptureSuccess || false,
+      mergeProgress: this._mergeProgress || 0,
+      lastRecordingResult: this._lastRecordingResult || null,
       duration: this.startTime ? Date.now() - this.startTime.getTime() : 0
     };
   }

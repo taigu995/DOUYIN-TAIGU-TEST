@@ -530,6 +530,56 @@ function createStreamCard(stream) {
     durationText = formatDuration(duration);
   }
 
+  // 音频/视频状态指示器（录制中）
+  let recordingIndicator = '';
+  if (isRecording && stream.recorder) {
+    const hasAudio = stream.recorder.hasAudio;
+    recordingIndicator = `
+      <span class="recording-indicator">
+        <span class="indicator-item video-active" title="正在录制视频">🎬 视频</span>
+        <span class="indicator-item ${hasAudio ? 'audio-active' : 'audio-inactive'}" title="${hasAudio ? '正在录制音频' : '未检测到音频源'}">
+          ${hasAudio ? '🔊 音频' : '🔇 无声'}
+        </span>
+      </span>
+    `;
+  }
+
+  // 上次录制结果（停止后显示）
+  let lastResultHtml = '';
+  if (!isRecording && stream.recorder && stream.recorder.lastRecordingResult) {
+    const result = stream.recorder.lastRecordingResult;
+    const timeSince = formatTimeAgo(result.timestamp);
+    let mergeStatusHtml = '';
+    if (result.mergeResult === true) {
+      mergeStatusHtml = '<span class="merge-status merge-success" title="视频和音频已成功合并">✅ 已合并</span>';
+    } else if (result.mergeResult === false) {
+      mergeStatusHtml = '<span class="merge-status merge-failed" title="合并失败，已保留纯视频文件">⚠️ 合并失败</span>';
+    } else {
+      mergeStatusHtml = '<span class="merge-status merge-none" title="未检测到音频，仅录制视频">📹 仅视频</span>';
+    }
+    lastResultHtml = `
+      <div class="last-recording-result">
+        <span class="result-label">上次录制 (${timeSince}):</span>
+        <span class="result-item ${result.hasAudio ? 'result-ok' : 'result-warn'}" title="${result.hasAudio ? '成功录制到音频' : '未录制到音频'}">
+          ${result.hasAudio ? '🔊 有音频' : '🔇 无音频'}
+        </span>
+        ${mergeStatusHtml}
+        <span class="result-file" title="${result.outputFile || ''}">📁 已保存</span>
+      </div>
+    `;
+  }
+
+  // 合并进度（录制中且正在合并时显示）
+  let mergeProgressHtml = '';
+  if (isRecording && stream.recorder && stream.recorder.mergeProgress > 0 && stream.recorder.mergeProgress < 100) {
+    mergeProgressHtml = `
+      <div class="merge-progress">
+        <div class="merge-progress-bar" style="width: ${stream.recorder.mergeProgress}%"></div>
+        <span class="merge-progress-text">合并中 ${stream.recorder.mergeProgress}%</span>
+      </div>
+    `;
+  }
+
   card.innerHTML = `
     <div class="stream-card-header">
       <div class="stream-info">
@@ -576,8 +626,10 @@ function createStreamCard(stream) {
         <span class="status-dot ${status.dotClass}"></span>
         <span class="status-text ${status.textClass}">${status.text}</span>
         ${durationText ? `<span class="stream-duration">${durationText}</span>` : ''}
-        ${isRecording ? `<span class="audio-indicator ${stream.recorder && stream.recorder.hasAudio ? 'has-audio' : 'no-audio'}" title="${stream.recorder && stream.recorder.hasAudio ? '录制含声音' : '仅录制画面（无声音）'}">${stream.recorder && stream.recorder.hasAudio ? '🔊 有声' : '🔇 无声'}</span>` : ''}
+        ${recordingIndicator}
       </div>
+      ${mergeProgressHtml}
+      ${lastResultHtml}
       ${stream.lastCheck ? `<span style="font-size:11px;color:var(--text-muted)">上次检测: ${formatTime(stream.lastCheck)}</span>` : ''}
     </div>
   `;
@@ -612,9 +664,19 @@ window.handleStartRecording = async function (roomId) {
 window.handleStopRecording = async function (roomId) {
   if (!isElectron) return;
   try {
+    showToast('正在停止录制并处理文件...', 'info');
     const result = await window.electronAPI.stopRecording(roomId);
     if (result.success) {
-      showToast('已停止录制', 'success');
+      const data = result.data || {};
+      if (data.mergeResult === true) {
+        showToast('录制完成，视频和音频已成功合并', 'success');
+      } else if (data.mergeResult === false) {
+        showToast('录制完成，但合并失败，已保留纯视频文件', 'warning');
+      } else if (data.hasAudio === false) {
+        showToast('录制完成（未检测到音频，仅保存视频）', 'warning');
+      } else {
+        showToast('已停止录制', 'success');
+      }
     } else {
       showToast('停止失败: ' + result.error, 'error');
     }
@@ -893,6 +955,14 @@ function formatTime(timestamp) {
   const date = new Date(timestamp);
   const pad = (n) => String(n).padStart(2, '0');
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function formatTimeAgo(timestamp) {
+  const diff = Date.now() - timestamp;
+  if (diff < 60000) return '刚刚';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
+  return `${Math.floor(diff / 86400000)}天前`;
 }
 
 // ========== Demo 模式（浏览器预览） ==========

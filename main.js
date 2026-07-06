@@ -193,8 +193,8 @@ function setupIPC() {
   // 停止录制
   ipcMain.handle('stop-recording', async (event, roomId) => {
     try {
-      await streamManager.stopRecording(roomId);
-      return { success: true };
+      const result = await streamManager.stopRecording(roomId);
+      return { success: true, data: result };
     } catch (err) {
       return { success: false, error: err.message };
     }

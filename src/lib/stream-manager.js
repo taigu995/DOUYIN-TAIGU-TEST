@@ -644,13 +644,17 @@ class StreamManager {
    */
   async stopRecording(roomId) {
     const streamState = this.streams.get(roomId);
-    if (!streamState || !streamState.recorder) return;
+    if (!streamState || !streamState.recorder) return null;
 
     const recorder = streamState.recorder;
     const outputFile = recorder.outputFile;
     const startTime = streamState.currentRecordingStart || recorder.startTime;
+    const hasAudio = recorder._audioCaptureSuccess || false;
     
     await recorder.stopRecording();
+    
+    // 获取合并结果
+    const lastResult = recorder._lastRecordingResult;
     
     // 确保录制记录被保存（即使 onStatusChange 回调未触发）
     if (startTime && outputFile) {
@@ -675,7 +679,9 @@ class StreamManager {
           endTime: Date.now(),
           outputFile: outputFile,
           fileSize: fileSize,
-          streamerName: streamState.info.streamerName
+          streamerName: streamState.info.streamerName,
+          hasAudio: hasAudio,
+          mergeResult: lastResult ? lastResult.mergeResult : null
         };
         streamState.info.recordingHistory.unshift(record);
         if (streamState.info.recordingHistory.length > 50) {
@@ -688,10 +694,19 @@ class StreamManager {
     
     streamState.currentRecordingStart = null;
     
+    // 在销毁 recorder 之前读取结果
+    const resultData = {
+      hasAudio,
+      mergeResult: lastResult ? lastResult.mergeResult : null,
+      outputFile
+    };
+    
     try { recorder.destroy(); } catch (e) { /* ignore */ }
     streamState.recorder = null;
     streamState.status = streamState.isLive ? 'live' : 'offline';
     this.notifyUpdate();
+
+    return resultData;
   }
 
   /**
